@@ -7,6 +7,6 @@ for(s in c(1e-3,5e-3,1e-2)){
                                           n))
   }
 }
-master$tag <- 1:nrow(master)
+master$seed <- sample(1:1e4,nrow(master))
 write.table(master, file = "params.txt",
             row.names = F,col.names = F, quote=F)
