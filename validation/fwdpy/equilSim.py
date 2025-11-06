@@ -8,6 +8,7 @@ from collections import defaultdict
 import pickle
 from datetime import datetime
 import argparse
+import msprime
 
 
 def eprint(*args, **kwargs):
@@ -40,6 +41,13 @@ def make_parser():
     )
     return parser
 
+def allele_frequencies(ts, sample_sets=None):
+    if sample_sets is None:
+       sample_sets = [ts.samples()] 
+    n = np.array([len(x) for x in sample_sets])
+    def f(x):
+       return x / n
+    return ts.sample_count_stat(sample_sets, f, len(sample_sets), windows='sites', polarised=True, mode='site', strict=False, span_normalise=False)
 
 @dataclass
 class Recorder:
@@ -58,12 +66,12 @@ def runsim(args):
     """
     # Set the rng with the given seed
     rng = fwdpy11.GSLrng(args.seed)
-    L = 1e6
-    r = 1e-8
-    u = 1e-8
     mean = - args.mean_sel_coef
     population_size = args.population_size
     scaling = 1
+    L = 1e6
+    r = 1e-8
+    u = 1e-8
     
     
     # test params
@@ -125,25 +133,35 @@ def runsim(args):
     ts = pop.dump_tables_to_tskit()
     return ts
 
-
 if __name__ == "__main__":
     parser = make_parser()
     args = parser.parse_args(sys.argv[1:])
-
+    seed = args.seed
+    
     eprint(
         current_time(),
         f"starting simulation for seed {args.seed}",
     )
 
     ts = runsim(args)
-    genMat = ts.genotype_matrix()
-
+        
+    neutMuts = msprime.sim_mutations(ts, 
+                                     rate=1e-6,
+                                     random_seed = seed,
+                                     model="binary",
+                                     discrete_genome=False,
+                                     keep=False)    
+    # neutMuts.num_mutations
+    closeIndex = [i for i,x in enumerate(neutMuts.sites_position) if abs(x - 5e5)<5e3]
+    frq = allele_frequencies(neutMuts)[closeIndex]
+    # min(abs(neutMuts.sites_position - 5e5))
+    
     import csv
     
-    with open(str(args.seed), 'w') as f:
+    with open(str(seed), 'w') as f:
      
         # using csv.writer method from CSV package
         write = csv.writer(f)
-        write.writerows(map(lambda x: x, genMat))
+        write.writerows(map(lambda x: x, frq))
         
 
