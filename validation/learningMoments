@@ -1,0 +1,38 @@
+import moments
+import numpy as np
+import math
+import matplotlib.pylab as plt
+
+u = 1e-8
+r = 4e-8
+s = 1e-3
+
+pointMassPosition = range(int(5e3),int(100.5e4),int(1e4))
+for i in pointMassPosition:
+    print(i)
+    
+    
+def pointMassContribution(pos, scaledu, s, t, r, focalPos):
+    return - scaledu / s * (s / (r * abs(pos-focalPos) + s) * (1 - math.exp(- r * abs(pos-focalPos) * t - s * t)))**2
+
+def B(positions, u, s, t, r, regionSize, focalPos):
+    scaledu = u * regionSize
+    return math.exp(sum([pointMassContribution(pos, scaledu, s, t, r, focalPos) for pos in positions]))
+
+B(pointMassPosition, u, s, 0, r, 1e4, 5e5) 
+
+testFun = [B(pointMassPosition, u, s, t, r, 1e4, 5e5) for t in range(int(1e4))]
+
+fig, ax = plt.subplots(1, 1, figsize=(8, 4))
+ax.plot(testFun, ".-", ms=8, lw=1, label="Neutral")
+ax.set_xlabel("Time in past")
+ax.set_ylabel("B(t)")
+ax.legend();
+
+# need to rescale and reverse time
+
+testFun[len(testFun)-1]
+
+fs = moments.Demographics1D.snm([10])
+
+fs.integrate(B, 1)
