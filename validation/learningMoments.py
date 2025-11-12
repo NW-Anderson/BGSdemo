@@ -47,7 +47,7 @@ rescaledFun = [x / testFun[len(testFun) - 1] for x in testFun]
 rescaledFun.reverse() 
 # computing the ancestral effective population size
 ancestralNe = censusSize * testFun[len(testFun) - 1]
-# rescaled times generations -> 2 Ne(anc) generations
+# rescaled time generations -> 2 Ne(anc) generations
 tms = [t / 2 / ancestralNe for t in range(int(1e4))]
 
 fig, ax = plt.subplots(1, 1, figsize=(8, 4))
@@ -57,11 +57,10 @@ ax.set_ylabel("B(t)")
 ax.legend();
 
 # this is our size function, but it needs to be automated
-# for moments.integrate we need a function that takes in tms and only tms
+# for moments.integrate we need a function that takes in t and only t
 # and returns the corresponding value of rescaledFun
 
 # same as above but time is now in units of 2 Ne(anc) generations
-# here, t is in genomic units of 2Ne(anc) generations
 # and time is reversed relative to ancTime (when B(t) is flat) so we start at equil
 def rescaledPointMassContribution(pos, scaledu, s, t, r, focalPos, ancestralNe, ancTime):
     return - scaledu / s * (s / (r * abs(pos-focalPos) + s) * (1 - math.exp(- r * abs(pos-focalPos) * (ancTime - t * 2 * ancestralNe) - s * (ancTime - t * 2 * ancestralNe))))**2
@@ -78,8 +77,9 @@ def getSizeFun(positions, u, s, r, regionSize, focalPos, censusSize, tol):
     # finding when equilibrium is reached
     diffs = [testFun[i+1] - testFun[i] for i in range(len(testFun)-1)]
     ancTime = next((i for i,x in enumerate(diffs) if abs(x) < tol), None)
-    # time to equil B(t) generations
-    ancTime = 2 * censusSize / 10 * ancTime
+    # time to equil B(t) in generations
+    # ancTime = 2 * censusSize / 10 * ancTime
+    ancTime = censusSize / 10 * ancTime
     # need to think about what happens if ancTime exceeds censusSize (the largest time considered above)
     ancB = B(positions, u, s, ancTime, r, regionSize, focalPos) 
     ancNe = ancB * censusSize 
@@ -95,9 +95,12 @@ f(ancTime / 2 / ancNe) [0] * ancNe
 f(ancTime / ancNe)
 
 # plotting size function
+# note the difference in where time starts using f and rescaledFun
+# ancTime is computed automatically in the former
+# chosen arbitrarily censusSize generations in the past in the latter
 test = [f(t) for t in np.arange(0,ancTime / 2 / ancNe, 0.001)]
 fig, ax = plt.subplots(1, 1, figsize=(8, 4))
-ax.plot(np.arange(0,ancTime / 2 / ancNe, 0.001), test, "-", ms=8, lw=1, label="getSizefun")
+ax.plot(np.arange(ancTime / 2 / ancNe, 1e4 / 2 / ancNe, 0.001), test, "-", ms=8, lw=1, label="getSizefun")
 ax.plot(tms, rescaledFun, "-", ms=8, lw=1, label="rescaledFun")
 ax.set_xlabel("Time in past")
 ax.set_ylabel("B(t)")
