@@ -52,10 +52,14 @@ def allele_frequencies(ts, sample_sets=None):
 @dataclass
 class Recorder:
     burnin: int
+    population_size: int
+    
     
     def __call__(self, pop, sampler):
         if pop.generation % 1000 == 0:
             eprint(current_time(), f"at generation {pop.generation}")
+        if np.logical_and(pop.generation >= self.burnin, pop.generation % population_size == 0):
+            sampler.assign(range(pop.N))
     
 def runsim(args):
     """
@@ -75,9 +79,9 @@ def runsim(args):
     
     
     # test params
-    # rng = fwdpy11.GSLrng(1)
-    # mean = - 0.01
-    # population_size = 1e3
+    rng = fwdpy11.GSLrng(1)
+    mean = - 0.01
+    population_size = 1e3
 
     U = u * L
     R = r * L
@@ -95,7 +99,7 @@ def runsim(args):
     pop = fwdpy11.DiploidPopulation(Ne, L)
 
     burnin = 20 * Ne
-    sampling = Ne  # number of sampling generations
+    sampling = 10 * Ne  # number of sampling generations
     # sampling = 100
     simlen = burnin + sampling
     eprint(current_time(), "total simulation length:", simlen)
@@ -116,7 +120,7 @@ def runsim(args):
     }
     params = fwdpy11.ModelParams(**pdict)
 
-    recorder = Recorder(burnin=burnin)
+    recorder = Recorder(burnin=burnin, population_size=int(population_size))
 
     eprint(current_time(), "starting simulation")
     fwdpy11.evolvets(
@@ -131,12 +135,18 @@ def runsim(args):
     eprint(current_time(), "finished simulation")
 
     ts = pop.dump_tables_to_tskit()
+    
+    # todo add pseudo replicates
     return ts
 
 if __name__ == "__main__":
     parser = make_parser()
     args = parser.parse_args(sys.argv[1:])
     seed = args.seed
+    population_size = args.population_size
+    
+    # test params
+    seed = 1
     
     eprint(
         current_time(),
@@ -144,24 +154,45 @@ if __name__ == "__main__":
     )
 
     ts = runsim(args)
+    
+    times = ts.nodes_time
+    sampleTimes = times[np.logical_and(times % population_size == 0, times <= 10 * population_size)]
+    times = np.unique(sampleTimes)
+    
+    data = np.empty((len(times), 1 + 2 * int(population_size)))
+    
+    for j,curTime in enumerate(times):    
+        sampleIndex = [i for i, x in enumerate(sampleTimes == curTime) if x]
         
-    neutMuts = msprime.sim_mutations(ts, 
-                                     rate=1e-6,
-                                     random_seed = seed,
-                                     model="binary",
-                                     discrete_genome=False,
-                                     keep=False)    
-    # neutMuts.num_mutations
-    closeIndex = [i for i,x in enumerate(neutMuts.sites_position) if abs(x - 5e5)<5e3]
-    frq = allele_frequencies(neutMuts)[closeIndex]
-    # min(abs(neutMuts.sites_position - 5e5))
+        afs = ts.allele_frequency_spectrum(sample_sets=[sampleIndex],
+                                           windows=[0,5e5-1,5e5+1,1e6],
+                                           mode="branch", 
+                                           polarised=True, 
+                                           span_normalise=False)
+        
+        midAfs = afs[1]
+            
+        data[j,:] = midAfs
     
-    import csv
+    np.savetxt(str(seed) + ".csv", data, delimiter=",")
+        
+    # neutMuts = msprime.sim_mutations(ts, 
+    #                                  rate=1e-6,
+    #                                  random_seed = seed,
+    #                                  model="binary",
+    #                                  discrete_genome=False,
+    #                                  keep=False)    
+    # # neutMuts.num_mutations
+    # closeIndex = [i for i,x in enumerate(neutMuts.sites_position) if abs(x - 5e5)<5e3]
+    # frq = allele_frequencies(neutMuts)[closeIndex]
+    # # min(abs(neutMuts.sites_position - 5e5))
     
-    with open(str(seed), 'w') as f:
+    # import csv
+    
+    # with open(str(seed), 'w') as f:
      
-        # using csv.writer method from CSV package
-        write = csv.writer(f)
-        write.writerows(map(lambda x: x, frq))
+    #     # using csv.writer method from CSV package
+    #     write = csv.writer(f)
+    #     write.writerows(map(lambda x: x, frq))
         
 

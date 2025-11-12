@@ -6,9 +6,13 @@ params <- fread("morereps.txt")
 names(params) <- c("s","N","seed")
 
 
-setwd("/media/nathan/T7/BGSdemo/morerepsData")
+# setwd("/media/nathan/T7/BGSdemo/morerepsData")
 # master <- data.table()
+# count <- 0
+# totalCount <- length(list.files())
 # for(file in list.files()){
+#   count <- count + 1
+#   print(paste(count, " of ", totalCount))
 #   par <- params %>% filter(paste(seed,".csv",sep="")==file)
 #   df <- fread(file) %>% as.matrix()
 #   df <- df[,1]
@@ -18,7 +22,7 @@ setwd("/media/nathan/T7/BGSdemo/morerepsData")
 #                                                frq = df))
 # }
 setwd("/media/nathan/T7/BGSdemo/")
-# save(df, file = "moreReps.RData")
+# save(master, file = "moreReps.RData")
 load(file = "moreReps.RData")
 
 # ggplot(master) + 
