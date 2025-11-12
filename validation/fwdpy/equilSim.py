@@ -79,9 +79,9 @@ def runsim(args):
     
     
     # test params
-    rng = fwdpy11.GSLrng(1)
-    mean = - 0.01
-    population_size = 1e3
+    # rng = fwdpy11.GSLrng(1)
+    # mean = - 0.01
+    # population_size = 1e3
 
     U = u * L
     R = r * L
@@ -146,7 +146,7 @@ if __name__ == "__main__":
     population_size = args.population_size
     
     # test params
-    seed = 1
+    # seed = 1
     
     eprint(
         current_time(),
