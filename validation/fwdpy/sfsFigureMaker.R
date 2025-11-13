@@ -5,6 +5,37 @@ setwd("~/Documents/GitHub/BGSdemo/validation/fwdpy")
 params <- fread("morereps.txt")
 names(params) <- c("s","N","seed")
 
+setwd("/media/nathan/T7/BGSdemo/afsData")
+master <- data.table()
+count <- 0
+totalCount <- length(list.files())
+for(file in list.files()){
+  count <- count + 1
+  if(count %% 100 == 0) print(paste(count, " of ", totalCount))
+  par <- params %>% filter(paste(seed,".csv",sep="")==file)
+  df <- fread(file) %>% as.matrix()
+  numsum <- nrow(df)
+  sfs <- colSums(df)
+  if(par$s %in% master$s && par$N %in% master$N){
+    # break
+    master <- master %>% mutate(numberSummed = if_else(par$s == s & par$N == N, 
+                                             numberSummed + numsum,
+                                             numberSummed),
+                      afs = if_else(par$s == s & par$N == N,
+                                    afs + sfs[obs+1],
+                                    afs))
+  }else{
+    master <- dplyr::bind_rows(master,
+                               data.table(s = par$s,
+                                          N = par$N,
+                                          seed = par$seed,
+                                          numberSummed = numsum,
+                                          obs = 0:(length(sfs)-1),
+                                          afs = sfs))
+  }
+}
+setwd("/media/nathan/T7/BGSdemo/")
+save(master, file = "afs.RData")
 
 # setwd("/media/nathan/T7/BGSdemo/morerepsData")
 # master <- data.table()
