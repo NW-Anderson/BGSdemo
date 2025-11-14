@@ -52,9 +52,11 @@ ggplot(df) +
   scale_y_log10()
 
 setwd("/media/nathan/T7/BGSdemo/equilAFS")
-for(s in unique(df$s)){
-  for(N in unique(df$N)){
-    
+for(curs in unique(df$s)){
+  for(curN in unique(df$N)){
+    tmp <- df %>% filter(s == curs,
+                         N == curN)
+    fwrite(list(tmp$afs),paste(curs,"_",curN,".csv",sep=""))
   }
 }
 
