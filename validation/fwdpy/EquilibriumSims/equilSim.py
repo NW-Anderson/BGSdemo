@@ -159,23 +159,41 @@ if __name__ == "__main__":
     sampleTimes = times[np.logical_and(times % population_size == 0, times <= 10 * population_size)]
     times = np.unique(sampleTimes)
     
-    data = np.empty((len(times), 1 + 2 * int(population_size)))
+    # for branch lengths SFS
     
-    for j,curTime in enumerate(times):    
-        sampleIndex = [i for i, x in enumerate(sampleTimes == curTime) if x]
+    # data = np.empty((len(times), 1 + 2 * int(population_size)))
+    
+    # for j,curTime in enumerate(times):    
+    #     sampleIndex = [i for i, x in enumerate(sampleTimes == curTime) if x]
         
-        afs = ts.allele_frequency_spectrum(sample_sets=[sampleIndex],
-                                           windows=[0,5e5-1,5e5+1,1e6],
-                                           mode="branch", 
-                                           polarised=True, 
-                                           span_normalise=False)
+    #     afs = ts.allele_frequency_spectrum(sample_sets=[sampleIndex],
+    #                                        windows=[0,5e5-1,5e5+1,1e6],
+    #                                        mode="branch", 
+    #                                        polarised=True, 
+    #                                        span_normalise=False)
         
-        midAfs = afs[1]
+    #     midAfs = afs[1]
             
-        data[j,:] = midAfs
+    #     data[j,:] = midAfs
     
-    np.savetxt(str(seed) + ".csv", data, delimiter=",")
+    # np.savetxt(str(seed) + ".csv", data, delimiter=",")
+    
+    # for selected SFS
+    
+    closeIndex = [i for i,x in enumerate(ts.sites_position) if abs(x - 5e5)<5e3]
+
+    data = np.empty((len(times), len(closeIndex)))
+    
+    for j,curTime in enumerate(times):
+        sampleIndex = [i for i,x in enumerate(sampleTimes == curTime) if x]
+        frq = allele_frequencies(ts, sample_sets=[sampleIndex])[:,0][closeIndex]
         
+        data[j,:] = frq
+        
+    np.savetxt(str(seed) + ".csv", data, delimiter = ",")
+    
+    # for neutral sites SFS
+    
     # neutMuts = msprime.sim_mutations(ts, 
     #                                  rate=1e-6,
     #                                  random_seed = seed,

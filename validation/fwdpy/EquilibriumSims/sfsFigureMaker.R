@@ -1,7 +1,7 @@
 library(data.table)
 library(dplyr)
 library(ggplot2)
-setwd("~/Documents/GitHub/BGSdemo/validation/fwdpy")
+setwd("~/Documents/GitHub/BGSdemo/validation/fwdpy/EquilibriumSims")
 params <- fread("morereps.txt")
 names(params) <- c("s","N","seed")
 
@@ -59,6 +59,46 @@ for(curs in unique(df$s)){
     fwrite(list(tmp$afs),paste(curs,"_",curN,".csv",sep=""))
   }
 }
+
+setwd("/media/nathan/T7/BGSdemo/equilSelData")
+master <- data.table()
+count <- 0
+totalCount <- length(list.files())
+for(file in list.files()){
+  count <- count + 1
+  print(paste(count, " of ", totalCount))
+  par <- params %>% filter(paste(seed,".csv",sep="")==file)
+  df <- fread(file) %>% as.matrix() %>% as.vector()
+  master <- dplyr::bind_rows(master,data.table(s = par$s,
+                                               N = par$N,
+                                               seed = par$seed,
+                                               frq = df))
+}
+setwd("/media/nathan/T7/BGSdemo/")
+# save(master, file = "equilSelData.RData")
+load(file = "equilSelData.RData")
+
+dens <- master %>% filter(frq != 0,
+                          frq != 1) %>%
+  group_by(N,s) %>% 
+  summarize(n = n())
+  reframe(densx = density(frq, 
+                          from =1/(2*unique(N)), 
+                          to = 1 - 1/(2*unique(N)))$x,
+          densy = density(frq, 
+                          from =1/(2*unique(N)), 
+                          to = 1 - 1/(2*unique(N)))$y,
+          mx = max(densy)) %>%
+  mutate(densy = densy / mx) %>% 
+  ungroup()
+
+ggplot(dens) + 
+  geom_line(aes(x = densx, 
+                y = densy, 
+                color = as.factor(s))) +
+  facet_wrap(vars(N)) +
+  scale_y_log10() 
+
 
 
 # setwd("/media/nathan/T7/BGSdemo/morerepsData")
