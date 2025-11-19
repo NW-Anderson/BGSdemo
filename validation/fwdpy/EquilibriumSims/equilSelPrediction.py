@@ -137,16 +137,20 @@ for curs in [1e-3, 5e-3, 1e-2]:
         fs = moments.Spectrum(moments.LinearSystem_1D.steady_state_1D(sample_size, gamma = - 2 * ancNe * curs))
         fs.integrate(f, ancTime / 2 / ancNe, gamma = gamma_f, h = 1/2, adapt_dt=True)
         
+        # gamma_f = lambda t: [- 2 * ancNe * curs * x for x in f(t)]
+        # fs = moments.Spectrum(moments.LinearSystem_1D.steady_state_1D(sample_size, gamma = - 2 * ancNe * curs))
+        # fs.integrate(f, ancTime / 2 / ancNe, gamma = - 2 * ancNe * curs, h = 1/2, adapt_dt=True)
+        
         fs_indep = moments.Spectrum(moments.LinearSystem_1D.steady_state_1D(sample_size, gamma = - 2 * curN * curs))
 
         # normalizing so singletons have freq 1, cause thats all I can think of right now
-        # fs = fs *  4 * 1e4 * 1e-8 * ancNe
-        # fs_indep = fs_indep * 4 * 1e4 * 1e-8 * curN
-        # projData = projData 
+        fs = fs *  4 * 1e4 * 1e-8 * ancNe
+        fs_indep = fs_indep * 4 * 1e4 * 1e-8 * curN
+        projData = projData 
         
-        fs = fs / fs[1]
-        fs_indep = fs_indep / fs_indep[1]
-        projData = projData / projData[1]
+        # fs = fs / fs[1]
+        # fs_indep = fs_indep / fs_indep[1]
+        # projData = projData / projData[1]
         
         fig, ax = plt.subplots(1, 1, figsize=(8, 4))
         ax.plot(fs, ".-", ms=8, lw=1, label="BGS")
