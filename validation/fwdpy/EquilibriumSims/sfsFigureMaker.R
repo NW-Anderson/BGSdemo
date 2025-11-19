@@ -42,7 +42,7 @@ setwd("/media/nathan/T7/BGSdemo/")
 load(file = "afs.RData")
 df <- master %>% mutate(afs = afs / numberSummed) %>% 
   select(-seed) 
-  # %>%  filter(obs != 0 & obs != 2 * N)
+# %>%  filter(obs != 0 & obs != 2 * N)
 df %>% mutate(theta = 4 * N * 1e-8 * 1e6) %>% 
   filter(obs == 2 * N)
 
@@ -60,20 +60,20 @@ for(curs in unique(df$s)){
   }
 }
 
-setwd("/media/nathan/T7/BGSdemo/equilSelData")
-master <- data.table()
-count <- 0
-totalCount <- length(list.files())
-for(file in list.files()){
-  count <- count + 1
-  print(paste(count, " of ", totalCount))
-  par <- params %>% filter(paste(seed,".csv",sep="")==file)
-  df <- fread(file) %>% as.matrix() %>% as.vector()
-  master <- dplyr::bind_rows(master,data.table(s = par$s,
-                                               N = par$N,
-                                               seed = par$seed,
-                                               frq = df))
-}
+# setwd("/media/nathan/T7/BGSdemo/equilSelData")
+# master <- data.table()
+# count <- 0
+# totalCount <- length(list.files())
+# for(file in list.files()){
+#   count <- count + 1
+#   print(paste(count, " of ", totalCount))
+#   par <- params %>% filter(paste(seed,".csv",sep="")==file)
+#   df <- fread(file) %>% as.matrix() %>% as.vector()
+#   master <- dplyr::bind_rows(master,data.table(s = par$s,
+#                                                N = par$N,
+#                                                seed = par$seed,
+#                                                frq = df))
+# }
 setwd("/media/nathan/T7/BGSdemo/")
 # save(master, file = "equilSelData.RData")
 load(file = "equilSelData.RData")
@@ -81,7 +81,7 @@ load(file = "equilSelData.RData")
 dens <- master %>% filter(frq != 0,
                           frq != 1) %>%
   group_by(N,s) %>% 
-  summarize(n = n())
+  # summarize(n = n())
   reframe(densx = density(frq, 
                           from =1/(2*unique(N)), 
                           to = 1 - 1/(2*unique(N)))$x,
@@ -99,7 +99,61 @@ ggplot(dens) +
   facet_wrap(vars(N)) +
   scale_y_log10() 
 
+setwd("/media/nathan/T7/BGSdemo/equilSelData")
+master <- data.table()
+count <- 0
+totalCount <- length(list.files())
+done <- c()
+for(file in list.files()){
+  count <- count + 1
+  if(count %% 100 == 0) print(paste(count, " of ", totalCount))
+  par <- params %>% filter(paste(seed,".csv",sep="")==file)
+  df <- fread(file) %>% as.matrix() %>% as.vector() %>% table()
+  obsVec <- unname(df) %>% as.vector()
+  frqVec <- names(df) %>% as.numeric()
+  tmp <- data.table(obs2 = obsVec,
+                    frq = frqVec)
+  df <- data.table(frq = 0:(2 * par$N) / 2 / par$N,
+                   obs = 0) %>%
+    merge(tmp, by = c("frq"), all = T) %>%
+    mutate(obs2 = if_else(is.na(obs2),
+                          0,
+                          obs2)) %>%
+    mutate(obs = obs + obs2) %>%
+    select(-obs2) %>%
+    mutate(N = par$N,
+           s = par$s)
+  foo <- paste(par$s,par$N)
+  if(foo %in% done){
+    # break
+    master <- merge(master, df, by = c("frq", "s", "N"), all = T) %>%
+      mutate(obs.y = if_else(is.na(obs.y),
+                             0,
+                             obs.y)) %>%
+      mutate(obs = obs.x + obs.y) %>%
+      select(-c(obs.x, obs.y))
+  }else{
+    done <- c(done, foo)
+    master <- dplyr::bind_rows(master,
+                               df)
+  }
+}
 
+ggplot(master) + 
+  geom_line(aes(x = frq,
+                y = obs,
+                color = as.factor(s))) + 
+  facet_wrap(vars(N)) + 
+  scale_y_log10()
+
+setwd("/media/nathan/T7/BGSdemo/parsedEquilSelData")
+for(curs in unique(master$s)){
+  for(curN in unique(master$N)){
+    tmp <- master %>% filter(s == curs,
+                         N == curN)
+    fwrite(list(tmp$obs),paste(curs,"_",curN,".csv",sep=""))
+  }
+}
 
 # setwd("/media/nathan/T7/BGSdemo/morerepsData")
 # master <- data.table()
