@@ -180,7 +180,7 @@ if __name__ == "__main__":
     
     # for selected SFS
     
-    closeIndex = [i for i,x in enumerate(ts.sites_position) if abs(x - 5e5)<5e3]
+    closeIndex = [i for i,x in enumerate(ts.sites_position) if abs(x - 5e5)<5e4]
 
     data = np.empty((len(times), len(closeIndex)))
     
@@ -190,7 +190,19 @@ if __name__ == "__main__":
         
         data[j,:] = frq
         
-    np.savetxt(str(seed) + ".csv", data, delimiter = ",")
+    np.savetxt(str(seed) + "_wi5e4.csv", data, delimiter = ",")
+    
+    closeIndex = [i for i,x in enumerate(ts.sites_position) if abs(x - 5e5)<1e5]
+
+    data = np.empty((len(times), len(closeIndex)))
+    
+    for j,curTime in enumerate(times):
+        sampleIndex = [i for i,x in enumerate(sampleTimes == curTime) if x]
+        frq = allele_frequencies(ts, sample_sets=[sampleIndex])[:,0][closeIndex]
+        
+        data[j,:] = frq
+        
+    np.savetxt(str(seed) + "_wi1e5.csv", data, delimiter = ",")
     
     # for neutral sites SFS
     

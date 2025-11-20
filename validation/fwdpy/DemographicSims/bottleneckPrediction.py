@@ -4,8 +4,10 @@ import math
 import matplotlib.pylab as plt
 import os
 import pandas as pd
+import demes
+import demesdraw
 
-os.chdir("/media/nathan/T7/BGSdemo/parsedEquilSelData")
+os.chdir("/media/nathan/T7/BGSdemo/parsedbottleneckData")
 
 # hardcoding some parameters
 u = 1e-8
@@ -14,7 +16,7 @@ L = 1e6
 regionSize = 1e4
 tol = 1e-3
 focalPos = 5e5
-sample_size = 500
+sample_size = 40
 proj_size = 40
 
 # positions of point masses.
@@ -48,6 +50,29 @@ def getSizeFun(positions, u, s, r, regionSize, focalPos, censusSize, tol):
     ancB = B(positions, u, s, ancTime, r, regionSize, focalPos) 
     ancNe = ancB * censusSize 
     return(lambda t: [math.exp(sum([rescaledPointMassContribution(pos, scaledu, s, t, r, focalPos, ancNe, ancTime) for pos in positions])) / ancB], ancTime, ancNe)
+
+def bFromDemes(positions, u, s, r, regionSize, focalPos, demesFile, tol):
+    
+    
+def censusFun(demesFile):
+    graph = demes.load(demesFile)
+    
+    def N(t):
+        sizes = []
+        for deme in graph.demes:
+            size_t = None
+            for epoch in deme.epochs:
+                if epoch.end_time <= t < epoch.start_time:
+                    if epoch.size_function == "constant":
+                        size_t = epoch.start_size
+                    else:
+                        dt = (epoch.start_time - t) / epoch.time_span
+                        r = math.log(epoch.end_size / epoch.start_size)
+                        size_t = epoch.start_size * math.exp(r * dt)
+                    break
+            sizes.append(size_t)
+        return sizes
+    return lambda t: N(t)
 
 # s = curs
 # censusSize = curN
@@ -86,6 +111,8 @@ for i in range(3):
         # ax.legend();
         
         f, ancTime, ancNe = getSizeFun(pointMassPosition, u, curs, r, regionSize, focalPos, curN, tol)
+        
+        
         
         # fig, ax = plt.subplots(1, 1, figsize=(8, 4))
         # ax.plot(np.arange(0,ancTime / 2 / ancNe, 0.001),[f(t) for t in np.arange(0,ancTime / 2 / ancNe, 0.001)], "-", ms=8, lw=1, label="getSizefun")
@@ -127,23 +154,25 @@ for i in range(3):
 # moments.Plotting.plot_1d_comp_Poisson(fs*8e-4, projData*2e-8)
 
 for curs in [1e-3, 5e-3, 1e-2]:
-    for curN in [1e3, 5e3, 1e4]:
-        simData = pd.read_csv(str(curs) + "_" + str(int(curN)) + ".csv", header = None)
+    for curdemo in ["1k.yaml", "5k.yaml"]:
+        os.chdir("/media/nathan/T7/BGSdemo/parsedbottleneckData")
+
+        simData = pd.read_csv(str(curs) + "_" + str(curdemo) + ".csv", header = None)
         simData = simData[0].to_numpy()
-        simData = moments.Spectrum(simData,data_folded=False) / 11 / 1000
+        simData = moments.Spectrum(simData,data_folded=False) 
         projData = simData.project([sample_size])
-        fs = moments.Spectrum(moments.LinearSystem_1D.steady_state_1D(sample_size, gamma = - 2 * curN * curs))
+        fs = moments.Demographics1D.snm([sample_size])
         
-        # fs_neu = moments.Spectrum(moments.Demographics1D.snm([sample_size]))
-        # fig, ax = plt.subplots(1, 1, figsize=(8, 4))
-        # ax.plot(fs, ".-", ms=8, lw=1, label="neg sel")
-        # ax.plot(fs_neu, "+-", ms=8, lw=1, label="neutral")
-        # ax.set_xlabel("Allele frequency")
-        # ax.set_ylabel("Density")
-        # ax.set_title("s = " + str(curs) + ", N = " + str(int(curN)))
-        # ax.legend();
+        os.chdir("/home/nathan/Documents/GitHub/BGSdemo/validation/fwdpy/DemographicSims")
+
+        # test
+        demo = demes.load(curdemo)
+        demesdraw.tubes(demo);
         
         f, ancTime, ancNe = getSizeFun(pointMassPosition, u, curs, r, regionSize, focalPos, curN, tol)
+        cs = censusFun(curdemo)
+        
+        g = lambda t: f(t) * cs(t)
         
         # fig, ax = plt.subplots(1, 1, figsize=(8, 4))
         # ax.plot(np.arange(0,ancTime / 2 / ancNe, 0.001),[f(t) for t in np.arange(0,ancTime / 2 / ancNe, 0.001)], "-", ms=8, lw=1, label="getSizefun")
