@@ -102,6 +102,7 @@ for i in range(3):
         ax[i,j].plot(projData, "x-", ms=8, lw=1, label="fwdpy")
         ax[i,j].plot(fs_neu, "+-", ms=8, lw=1, label="SNM")
         ax[i,j].set_title("s = " + str(curs) + ", N = " + str(int(curN)))
+        ax[i,j].set_yscale('log')
         if np.logical_and(i == 2, j == 2):
             ax[i,j].legend();
 

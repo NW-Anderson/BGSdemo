@@ -52,11 +52,29 @@ def getSizeFun(positions, u, s, r, regionSize, focalPos, censusSize, tol):
     return(lambda t: [math.exp(sum([rescaledPointMassContribution(pos, scaledu, s, t, r, focalPos, ancNe, ancTime) for pos in positions])) / ancB], ancTime, ancNe)
 
 def bFromDemes(positions, u, s, r, regionSize, focalPos, demesFile, tol):
+    graph = demes.load(demesFile)
+    scaledu = u * regionSize
+    oldestEpoch, censusSize = getOldestEpoch(graph)
+    testFun = [B(positions, u, s, t, r, regionSize, focalPos) for t in range(0,int(10 * censusSize),int(censusSize/10))]
+    diffs = [testFun[i+1] - testFun[i] for i in range(len(testFun)-1)]
+    ancTime = next((i for i,x in enumerate(diffs) if abs(x) < tol), None)
+    ancTime = max(ancTime, oldestEpoch)
+    ancB = B(positions, u, s, ancTime, r, regionSize, focalPos) 
+    ancNe = ancB * censusSize 
+    return(lambda t: [math.exp(sum([rescaledPointMassContribution(pos, scaledu, s, t, r, focalPos, ancNe, ancTime) for pos in positions])) / ancB], ancTime, ancNe)
     
+def getOldestEpoch(graph):
+    tme = 0
+    for deme in graph.demes:
+        for epoch in deme.epochs:
+            if epoch.end_time > tme:
+                tme = epoch.end_time
+                size = epoch.start_size
+    return tme, size
+            
     
 def censusFun(demesFile):
     graph = demes.load(demesFile)
-    
     def N(t):
         sizes = []
         for deme in graph.demes:
@@ -74,80 +92,88 @@ def censusFun(demesFile):
         return sizes
     return lambda t: N(t)
 
+def reversedCensusFun(demesFile, ancTime, ancNe):
+    cs = censusFun(curdemo)
+    return lambda t: [x  / cs(ancTime)[0] for x in cs(ancTime - t * 2 * ancNe)]
+
 # s = curs
-# censusSize = curN
+curN = censusSize
 # positions = pointMassPosition
-# fig, ax = plt.subplots(1, 1, figsize=(8, 4))
-# ax.plot([B(pointMassPosition, u, s, t, r, 1e4, 5e5) for t in range(int(10 * curN))], "-", ms=8, lw=1, label="Neutral")
-# ax.set_xlabel("Time in past")
-# ax.set_ylabel("B(t)")
-# ax.legend();
+fig, ax = plt.subplots(1, 1, figsize=(8, 4))
+ax.plot([B(pointMassPosition, u, s, t, r, 1e4, 5e5) for t in range(int(10 * curN))], "-", ms=8, lw=1, label="Neutral")
+ax.set_xlabel("Time in past")
+ax.set_ylabel("B(t)")
+ax.legend();
 
 # for curs in [1e-3, 5e-3, 1e-2]:
 #     for curN in [1e3, 5e3, 1e4]:
-fig, ax = plt.subplots(3, 3, figsize=(16, 8), sharex=True, sharey=False)
+fig, ax = plt.subplots(3, 2, figsize=(16, 8), sharex=True, sharey=False)
 fig.text(0.5, 0.04, 'Allele Frequency', ha='center')
 fig.text(0.04, 0.5, 'Count', va='center', rotation='vertical')
 fig.subplots_adjust(hspace = .25)
 
 for i in range(3):
-    for j in range(3):
+    for j in range(2):
         curs = [1e-3, 5e-3, 1e-2][i]
-        curN = [1e3, 5e3, 1e4][j]
-        simData = pd.read_csv(str(curs) + "_" + str(int(curN)) + ".csv", header = None)
-        simData = pd.read_csv(str(curs) + "_" + str(int(curN)) + ".csv", header = None)
+        curdemo = ["1k.yaml", "5k.yaml"][j]
+        
+        os.chdir("/media/nathan/T7/BGSdemo/parsedbottleneckData")
+
+        simData = pd.read_csv(str(curs) + "_" + str(curdemo) + ".csv", header = None)
         simData = simData[0].to_numpy()
-        simData = moments.Spectrum(simData,data_folded=False) / 11 / 1000
+        simData = moments.Spectrum(simData,data_folded=False) 
         projData = simData.project([proj_size])
-        fs = moments.Spectrum(moments.LinearSystem_1D.steady_state_1D(sample_size, gamma = - 2 * curN * curs))
         
-        # fs_neu = moments.Spectrum(moments.Demographics1D.snm([sample_size]))
-        # fig, ax = plt.subplots(1, 1, figsize=(8, 4))
-        # ax.plot(fs, ".-", ms=8, lw=1, label="neg sel")
-        # ax.plot(fs_neu, "+-", ms=8, lw=1, label="neutral")
-        # ax.set_xlabel("Allele frequency")
-        # ax.set_ylabel("Density")
-        # ax.set_title("s = " + str(curs) + ", N = " + str(int(curN)))
-        # ax.legend();
+        os.chdir("/home/nathan/Documents/GitHub/BGSdemo/validation/fwdpy/DemographicSims")
+
+        # test
+        demo = demes.load(curdemo)
+        # demesdraw.tubes(demo);
         
-        f, ancTime, ancNe = getSizeFun(pointMassPosition, u, curs, r, regionSize, focalPos, curN, tol)
-        
-        
-        
+        f, ancTime, ancNe = bFromDemes(pointMassPosition, u, curs, r, regionSize, focalPos, curdemo, tol)
+                
         # fig, ax = plt.subplots(1, 1, figsize=(8, 4))
         # ax.plot(np.arange(0,ancTime / 2 / ancNe, 0.001),[f(t) for t in np.arange(0,ancTime / 2 / ancNe, 0.001)], "-", ms=8, lw=1, label="getSizefun")
         # ax.set_xlabel("Time in past")
         # ax.set_ylabel("B(t)")
-        # ax.set_title("s = " + str(curs) + ", N = " + str(int(curN)))
+        # ax.set_title("s = " + str(curs) + ", demo = " + curdemo)
         # ax.legend();
         
-        # gamma_f = lambda t: [- 2 * ancNe * curs * x for x in f(t)]
-        # fs = moments.Spectrum(moments.LinearSystem_1D.steady_state_1D(sample_size, gamma = - 2 * ancNe * curs))
-        # fs.integrate(f, ancTime / 2 / ancNe, gamma = gamma_f, h = 1/2, adapt_dt=True)
+        cs = reversedCensusFun(curdemo, ancTime, ancNe)
         
-        gamma_f = lambda t: [- 2 * ancNe * curs * x for x in f(t)]
-        fs = moments.Spectrum(moments.LinearSystem_1D.steady_state_1D(sample_size, gamma = - 2 * ancNe * curs))
-        fs.integrate(f, ancTime / 2 / ancNe, gamma = - 2 * ancNe * curs, h = 1/2, adapt_dt=True)
+        # fig, ax = plt.subplots(1, 1, figsize=(8, 4))
+        # ax.plot(np.arange(0,ancTime / 2 / ancNe, 0.001),[cs(t) for t in np.arange(0,ancTime / 2 / ancNe, 0.001)], "-", ms=8, lw=1, label="reversedCensusSize")
+        # ax.set_xlabel("Time in past")
+        # ax.set_ylabel("cs(t)")
+        # ax.set_title("s = " + str(curs) + ", demo = " + curdemo)
+        # ax.legend();
         
-        fs_indep = moments.Spectrum(moments.LinearSystem_1D.steady_state_1D(sample_size, gamma = - 2 * curN * curs))
+        g = lambda t: [x * y for x,y in zip(f(t), cs(t))]
+        
+        # fig, ax = plt.subplots(1, 1, figsize=(8, 4))
+        # ax.plot(np.arange(0,ancTime / 2 / ancNe, 0.001),[g(t) for t in np.arange(0,ancTime / 2 / ancNe, 0.001)], "-", ms=8, lw=1, label="scaledPopSize")
+        # ax.set_xlabel("Time in past")
+        # ax.set_ylabel("g(t)")
+        # ax.set_title("s = " + str(curs) + ", demo = " + curdemo)
+        # ax.legend();
+        
+        fs = moments.Demographics1D.snm([sample_size])
+        fs.integrate(g, ancTime / 2 / ancNe)
+        
+        fs_neu = moments.Demographics1D.snm([proj_size])
+        fs_neu.integrate(cs, ancTime / 2 / ancTime)
 
         # normalizing so singletons have freq 1, cause thats all I can think of right now
-        fs = fs *  4 * 1e4 * 1e-8 * ancNe
-        fs_indep = fs_indep * 4 * 1e4 * 1e-8 * curN
-        projData = projData 
-        
-        fs = fs.project([proj_size])
-        fs_indep = fs_indep.project([proj_size])
-        
-        # todo i think the correct thing is tp divide the previous lines by 2
-        # regular theta for a single site and span normalized projData
+        fs = fs * 8 * 1e-8 * ancNe
+        projData = projData * 1e-8
+        fs_neu = fs_neu * 8 * 1e-8 * censusFun(curdemo)(ancTime)[0]        
         
         ax[i,j].plot(fs, ".-", ms=8, lw=1, label="BGS")
         ax[i,j].plot(projData, "x-", ms=8, lw=1, label="fwdpy")
-        ax[i,j].plot(fs_indep, "+-", ms=8, lw=1, label="single locus")
-        ax[i,j].set_title("s = " + str(curs) + ", N = " + str(int(curN)))
+        ax[i,j].plot(fs_neu, "+-", ms=8, lw=1, label="neutral")
+        ax[i,j].set_title("s = " + str(curs) + ", demo = " + curdemo)
         ax[i,j].set_yscale('log')
-        if np.logical_and(i == 2, j == 2):
+        if np.logical_and(i == 2, j == 1):
             ax[i,j].legend();
             
 
@@ -160,52 +186,58 @@ for curs in [1e-3, 5e-3, 1e-2]:
         simData = pd.read_csv(str(curs) + "_" + str(curdemo) + ".csv", header = None)
         simData = simData[0].to_numpy()
         simData = moments.Spectrum(simData,data_folded=False) 
-        projData = simData.project([sample_size])
-        fs = moments.Demographics1D.snm([sample_size])
+        projData = simData.project([proj_size])
         
         os.chdir("/home/nathan/Documents/GitHub/BGSdemo/validation/fwdpy/DemographicSims")
 
         # test
         demo = demes.load(curdemo)
-        demesdraw.tubes(demo);
+        # demesdraw.tubes(demo);
         
-        f, ancTime, ancNe = getSizeFun(pointMassPosition, u, curs, r, regionSize, focalPos, curN, tol)
-        cs = censusFun(curdemo)
-        
-        g = lambda t: f(t) * cs(t)
-        
+        f, ancTime, ancNe = bFromDemes(pointMassPosition, u, curs, r, regionSize, focalPos, curdemo, tol)
+                
         # fig, ax = plt.subplots(1, 1, figsize=(8, 4))
         # ax.plot(np.arange(0,ancTime / 2 / ancNe, 0.001),[f(t) for t in np.arange(0,ancTime / 2 / ancNe, 0.001)], "-", ms=8, lw=1, label="getSizefun")
         # ax.set_xlabel("Time in past")
         # ax.set_ylabel("B(t)")
-        # ax.set_title("s = " + str(curs) + ", N = " + str(int(curN)))
+        # ax.set_title("s = " + str(curs) + ", demo = " + curdemo)
         # ax.legend();
         
-        # gamma_f = lambda t: [- 2 * ancNe * curs * x for x in f(t)]
-        # fs = moments.Spectrum(moments.LinearSystem_1D.steady_state_1D(sample_size, gamma = - 2 * ancNe * curs))
-        # fs.integrate(f, ancTime / 2 / ancNe, gamma = gamma_f, h = 1/2, adapt_dt=True)
+        cs = reversedCensusFun(curdemo, ancTime, ancNe)
         
-        gamma_f = lambda t: [- 2 * ancNe * curs * x for x in f(t)]
-        fs = moments.Spectrum(moments.LinearSystem_1D.steady_state_1D(sample_size, gamma = - 2 * ancNe * curs))
-        fs.integrate(f, ancTime / 2 / ancNe, gamma = - 2 * ancNe * curs, h = 1/2, adapt_dt=True)
+        # fig, ax = plt.subplots(1, 1, figsize=(8, 4))
+        # ax.plot(np.arange(0,ancTime / 2 / ancNe, 0.001),[cs(t) for t in np.arange(0,ancTime / 2 / ancNe, 0.001)], "-", ms=8, lw=1, label="reversedCensusSize")
+        # ax.set_xlabel("Time in past")
+        # ax.set_ylabel("cs(t)")
+        # ax.set_title("s = " + str(curs) + ", demo = " + curdemo)
+        # ax.legend();
         
-        fs_indep = moments.Spectrum(moments.LinearSystem_1D.steady_state_1D(sample_size, gamma = - 2 * curN * curs))
+        g = lambda t: [x * y for x,y in zip(f(t), cs(t))]
+        
+        # fig, ax = plt.subplots(1, 1, figsize=(8, 4))
+        # ax.plot(np.arange(0,ancTime / 2 / ancNe, 0.001),[g(t) for t in np.arange(0,ancTime / 2 / ancNe, 0.001)], "-", ms=8, lw=1, label="scaledPopSize")
+        # ax.set_xlabel("Time in past")
+        # ax.set_ylabel("g(t)")
+        # ax.set_title("s = " + str(curs) + ", demo = " + curdemo)
+        # ax.legend();
+        
+        fs = moments.Demographics1D.snm([sample_size])
+        fs.integrate(g, ancTime / 2 / ancNe)
+        
+        fs_neu = moments.Demographics1D.snm([proj_size])
+        fs_neu.integrate(cs, ancTime / 2 / ancTime)
 
         # normalizing so singletons have freq 1, cause thats all I can think of right now
-        fs = fs *  4 * 1e4 * 1e-8 * ancNe
-        fs_indep = fs_indep * 4 * 1e4 * 1e-8 * curN
-        projData = projData 
-        
-        # fs = fs / fs[1]
-        # fs_indep = fs_indep / fs_indep[1]
-        # projData = projData / projData[1]
+        fs = fs * 8 * 1e-8 * ancNe
+        projData = projData * 1e-8
+        fs_neu = fs_neu * 8 * 1e-8 * censusFun(curdemo)(ancTime)[0]        
         
         fig, ax = plt.subplots(1, 1, figsize=(8, 4))
         ax.plot(fs, ".-", ms=8, lw=1, label="BGS")
-        ax.plot(fs_indep, "+-", ms=8, lw=1, label="Indep")
+        ax.plot(fs_neu, "+-", ms=8, lw=1, label="neutral")
         ax.plot(projData, "x-", ms=8, lw=1, label="fwdpy")
         ax.set_xlabel("Allele frequency")
         ax.set_ylabel("Density")
-        ax.set_title("s = " + str(curs) + ", N = " + str(int(curN)))
+        ax.set_title("s = " + str(curs) + ", demo = " + curdemo)
         ax.legend();
         

@@ -60,6 +60,70 @@ for(curs in unique(df$s)){
   }
 }
 
+setwd("/media/nathan/T7/BGSdemo/moreSelData")
+master <- data.table()
+count <- 0
+totalCount <- length(list.files())
+done <- c()
+for(file in list.files()){
+  curSeed = strsplit(file, "_")[[1]][1] %>% as.integer()
+  win = strsplit(file, "_")[[1]][2]
+  count <- count + 1
+  if(count %% 100 == 0) print(paste(count, " of ", totalCount))
+  par <- params %>% filter(seed==curSeed)
+  df <- fread(file) %>% as.matrix() %>% as.vector() %>% table()
+  obsVec <- unname(df) %>% as.vector()
+  frqVec <- names(df) %>% as.numeric()
+  tmp <- data.table(obs2 = obsVec,
+                    frq = frqVec)
+  df <- data.table(frq = 0:(2 * par$N) / 2 / par$N,
+                   obs = 0) %>%
+    merge(tmp, by = c("frq"), all = T) %>%
+    mutate(obs2 = if_else(is.na(obs2),
+                          0,
+                          obs2)) %>%
+    mutate(obs = obs + obs2) %>%
+    select(-obs2) %>%
+    mutate(N = par$N,
+           s = par$s,
+           wi = win)
+  foo <- paste(par$s,par$N,win)
+  if(foo %in% done){
+    # break
+    master <- merge(master, df, by = c("frq", "s", "N", "wi"), all = T) %>%
+      mutate(obs.y = if_else(is.na(obs.y),
+                             0,
+                             obs.y)) %>%
+      mutate(obs = obs.x + obs.y) %>%
+      select(-c(obs.x, obs.y))
+  }else{
+    done <- c(done, foo)
+    master <- dplyr::bind_rows(master,
+                               df)
+  }
+}
+
+ggplot(master) + 
+  geom_line(aes(x = frq,
+                y = obs,
+                color = as.factor(s))) + 
+  facet_grid(rows = vars(N),
+             cols = vars(wi)) + 
+  scale_y_log10()
+
+setwd("/media/nathan/T7/BGSdemo/parsedMoreSelData")
+for(curs in unique(master$s)){
+  for(curN in unique(master$N)){
+    for(curwi in unique(master$wi)){
+      tmp <- master %>% filter(s == curs,
+                               N == curN,
+                               wi == curwi)
+      fwrite(list(tmp$obs),paste(curs,"_",curN,"_",curwi,".csv",sep=""))
+    }
+  }
+}
+
+
 # setwd("/media/nathan/T7/BGSdemo/equilSelData")
 # master <- data.table()
 # count <- 0
