@@ -117,14 +117,14 @@ def reversedCensusFun(demesFile, ancTime, ancNe):
     cs = censusFun(demesFile)
     return lambda t: [x  / cs(ancTime)[0] for x in cs(ancTime - t * 2 * ancNe) if x != None]
 
-# s = curs
-curN = censusSize
-# positions = pointMassPosition
-fig, ax = plt.subplots(1, 1, figsize=(8, 4))
-ax.plot([B(pointMassPosition, u, s, t, r, 1e4, 5e5) for t in range(int(10 * curN))], "-", ms=8, lw=1, label="Neutral")
-ax.set_xlabel("Time in past")
-ax.set_ylabel("B(t)")
-ax.legend();
+# # s = curs
+# curN = censusSize
+# # positions = pointMassPosition
+# fig, ax = plt.subplots(1, 1, figsize=(8, 4))
+# ax.plot([B(pointMassPosition, u, s, t, r, 1e4, 5e5) for t in range(int(10 * curN))], "-", ms=8, lw=1, label="Neutral")
+# ax.set_xlabel("Time in past")
+# ax.set_ylabel("B(t)")
+# ax.legend();
 
 # for curs in [1e-3, 5e-3, 1e-2]:
 #     for curN in [1e3, 5e3, 1e4]:
