@@ -27,3 +27,21 @@ for(s in c(1e-3,5e-3,1e-2)){
 master$seed <- sample(1:1e5,nrow(master))
 write.table(master, file = "morereps.txt",
             row.names = F,col.names = F, quote=F)
+
+library(dplyr)
+master <- data.frame()
+for(s in c(1e-3,5e-3,1e-2)){
+  for(n in c(1e3,5e3,1e4)){
+    for(rep in 1:1000){
+      master <- dplyr::bind_rows(master,
+                                 data.frame(s,
+                                            n,
+                                            "YRI_recombination_map_hg38_chr_22.bed",
+                                            "roulette_tbl_chr22.csv",
+                                            "exons_chr22.bed"))
+    }
+  }
+}
+master$seed <- sample(1:1e5,nrow(master))
+write.table(master, file = "humanmap.txt",
+            row.names = F,col.names = F, quote=F)

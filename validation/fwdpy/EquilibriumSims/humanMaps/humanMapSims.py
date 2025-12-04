@@ -1,15 +1,16 @@
 import numpy as np
 import fwdpy11
-import time
+# import time
 from dataclasses import dataclass
 import sys
-from typing import List
-from collections import defaultdict
-import pickle
+# from typing import List
+# from collections import defaultdict
+# import pickle
 from datetime import datetime
 import argparse
-import pandas as pd
-import os
+# import pandas as pd
+#test
+# import os
 
 def eprint(*args, **kwargs):
     print(*args, file=sys.stderr, **kwargs)
@@ -226,13 +227,13 @@ def runsim(args):
     
     
     # test params
-    os.chdir("/media/nathan/T7/BGSdemo/humanData")
-    rng = fwdpy11.GSLrng(1)
-    mean = - 0.01
-    population_size = 1e3
-    recName = "YRI_recombination_map_hg38_chr_22.bed"
-    mutName = "roulette_tbl_chr22.csv"
-    exonName = "exons_chr22.bed"
+    # os.chdir("/media/nathan/T7/BGSdemo/humanData")
+    # rng = fwdpy11.GSLrng(1)
+    # mean = - 0.01
+    # population_size = 1e3
+    # recName = "YRI_recombination_map_hg38_chr_22.bed"
+    # mutName = "roulette_tbl_chr22.csv"
+    # exonName = "exons_chr22.bed"
     
     recMap = read_rec_map(recName)
     mutMap = read_mut_rates(mutName)
@@ -242,7 +243,7 @@ def runsim(args):
     mutMap = simplify_rate_map(mutMap)
     
     rec_regions = make_rec_regions(recMap)
-    sel_regions,U = make_sel_regions(mutMap, exonMap)
+    sel_regions,U = make_sel_regions(mutMap, exonMap, mean, scaling)
 
     # Initialize the population
     Ne = int(population_size / scaling)
@@ -255,7 +256,6 @@ def runsim(args):
     # sampling = 100
     simlen = burnin + sampling
     eprint(current_time(), "total simulation length:", simlen)
-    
 
     pdict = {
         # Multiplicative selection model
@@ -290,7 +290,7 @@ def runsim(args):
     ts = pop.dump_tables_to_tskit()
     
     # todo add pseudo replicates
-    return ts
+    return ts, L
 
 if __name__ == "__main__":
     parser = make_parser()
@@ -306,7 +306,7 @@ if __name__ == "__main__":
         f"starting simulation for seed {args.seed}",
     )
 
-    ts = runsim(args)
+    ts,L = runsim(args)
     
     times = ts.nodes_time
     sampleTimes = times[np.logical_and(times % population_size == 0, times <= 10 * population_size)]
@@ -314,48 +314,48 @@ if __name__ == "__main__":
     
     # for branch lengths SFS
     
-    # data = np.empty((len(times), 1 + 2 * int(population_size)))
+    data = np.empty((len(times), 1 + 2 * int(population_size)))
     
-    # for j,curTime in enumerate(times):    
-    #     sampleIndex = [i for i, x in enumerate(sampleTimes == curTime) if x]
+    for j,curTime in enumerate(times):    
+        sampleIndex = [i for i, x in enumerate(sampleTimes == curTime) if x]
         
-    #     afs = ts.allele_frequency_spectrum(sample_sets=[sampleIndex],
-    #                                        windows=[0,5e5-1,5e5+1,1e6],
-    #                                        mode="branch", 
-    #                                        polarised=True, 
-    #                                        span_normalise=False)
+        afs = ts.allele_frequency_spectrum(sample_sets=[sampleIndex],
+                                           windows=[0,L/2-1,L/2+1,L],
+                                           mode="branch", 
+                                           polarised=True, 
+                                           span_normalise=False)
         
-    #     midAfs = afs[1]
+        midAfs = afs[1]
             
-    #     data[j,:] = midAfs
+        data[j,:] = midAfs
     
-    # np.savetxt(str(seed) + ".csv", data, delimiter=",")
+    np.savetxt(str(seed) + ".csv", data, delimiter=",")
     
     # for selected SFS
     
-    closeIndex = [i for i,x in enumerate(ts.sites_position) if abs(x - 5e5)<5e4]
+    # closeIndex = [i for i,x in enumerate(ts.sites_position) if abs(x - 5e5)<5e4]
 
-    data = np.empty((len(times), len(closeIndex)))
+    # data = np.empty((len(times), len(closeIndex)))
     
-    for j,curTime in enumerate(times):
-        sampleIndex = [i for i,x in enumerate(sampleTimes == curTime) if x]
-        frq = allele_frequencies(ts, sample_sets=[sampleIndex])[:,0][closeIndex]
+    # for j,curTime in enumerate(times):
+    #     sampleIndex = [i for i,x in enumerate(sampleTimes == curTime) if x]
+    #     frq = allele_frequencies(ts, sample_sets=[sampleIndex])[:,0][closeIndex]
         
-        data[j,:] = frq
+    #     data[j,:] = frq
         
-    np.savetxt(str(seed) + "_wi5e4.csv", data, delimiter = ",")
+    # np.savetxt(str(seed) + "_wi5e4.csv", data, delimiter = ",")
     
-    closeIndex = [i for i,x in enumerate(ts.sites_position) if abs(x - 5e5)<1e5]
+    # closeIndex = [i for i,x in enumerate(ts.sites_position) if abs(x - 5e5)<1e5]
 
-    data = np.empty((len(times), len(closeIndex)))
+    # data = np.empty((len(times), len(closeIndex)))
     
-    for j,curTime in enumerate(times):
-        sampleIndex = [i for i,x in enumerate(sampleTimes == curTime) if x]
-        frq = allele_frequencies(ts, sample_sets=[sampleIndex])[:,0][closeIndex]
+    # for j,curTime in enumerate(times):
+    #     sampleIndex = [i for i,x in enumerate(sampleTimes == curTime) if x]
+    #     frq = allele_frequencies(ts, sample_sets=[sampleIndex])[:,0][closeIndex]
         
-        data[j,:] = frq
+    #     data[j,:] = frq
         
-    np.savetxt(str(seed) + "_wi1e5.csv", data, delimiter = ",")
+    # np.savetxt(str(seed) + "_wi1e5.csv", data, delimiter = ",")
     
     # for neutral sites SFS
     
