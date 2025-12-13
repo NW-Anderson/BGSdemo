@@ -7,7 +7,7 @@ import pandas as pd
 
 # hardcoding some parameters
 tol = 1e-4
-sample_size = 400
+sample_size = 40
 
 def pointMassContribution(pos, scaledu, s, t, r, focalPos):
     return - scaledu / s * (s / (r * abs(pos-focalPos) + s) * (1 - math.exp(- r * abs(pos-focalPos) * t - s * t)))**2
@@ -212,7 +212,7 @@ midPoints = [(x + y)/2 for x,y,z in exonMutMap]
 
 # np.savetxt("exonMutMap.csv", exonMutMap, delimiter = ",")
 
-focalPos = 50270000
+# focalPos = 50270000
 # f, ancTime, ancNe = getSizeFun_maps(midPoints, exonMutMap, s, recMap, focalPos, censusSize, tol)
 # fig, ax = plt.subplots(1, 1, figsize=(8, 4))
 # ax.plot(np.arange(0,ancTime / 2 / ancNe, 0.001),[f(t) for t in np.arange(0,ancTime / 2 / ancNe, 0.001)], "-", ms=8, lw=1, label="getSizefun")
@@ -277,11 +277,12 @@ for i in range(3):
         
         
         ax[i,j].plot(fs, "-", ms=8, lw=1, label="BGS")
-        # ax[i,j].plot(projData, "-", ms=8, lw=1, label="fwdpy")
+        ax[i,j].plot(projData, "-", ms=8, lw=1, label="fwdpy")
         ax[i,j].plot(fs_neu, "-", ms=8, lw=1, label="SNM")
         ax[i,j].set_title("s = " + str(curs) + ", N = " + str(int(curN)))
         ax[i,j].set_yscale('log')
         ax[i,j].annotate("B=" + str(round(fs.pi()/fs_neu.pi(),3)),xy=(sample_size / 10, max(fs[1:-1]) * 0.8),size="x-large")
+        ax[i,j].annotate("B_sim=" + str(round(projData.pi()/fs_neu.pi(),3)),xy=(sample_size / 10, max(fs[1:-1]) * 0.55),size="x-large")
         if np.logical_and(i == 2, j == 2):
             ax[i,j].legend();
 

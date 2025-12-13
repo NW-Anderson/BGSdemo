@@ -319,11 +319,17 @@ if __name__ == "__main__":
     for j,curTime in enumerate(times):    
         sampleIndex = [i for i, x in enumerate(sampleTimes == curTime) if x]
         
+        # afs = ts.allele_frequency_spectrum(sample_sets=[sampleIndex],
+        #                                    windows=[0,L/2-1,L/2+1,L],
+        #                                    mode="branch", 
+        #                                    polarised=True, 
+        #                                    span_normalise=False)
         afs = ts.allele_frequency_spectrum(sample_sets=[sampleIndex],
-                                           windows=[0,L/2-1,L/2+1,L],
+                                           windows=[0,50270000-1,50270000+1,L],
                                            mode="branch", 
                                            polarised=True, 
                                            span_normalise=False)
+        
         
         midAfs = afs[1]
             

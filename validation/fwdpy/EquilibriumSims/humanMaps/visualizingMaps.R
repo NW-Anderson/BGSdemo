@@ -83,3 +83,5 @@ for(i in 0:102 * 5e5){
   mxi <- bind_rows(mxi, df)
 }
 mxi <- mxi %>% filter(pos != 0)
+pos <- mxi$pos
+fwrite(list(pos),"focalPos.csv")
