@@ -1,6 +1,65 @@
 library(data.table)
 library(dplyr)
 library(ggplot2)
+setwd("~/Documents/GitHub/BGSdemo/validation/fwdpy/EquilibriumSims/humanMaps")
+params <- fread("humanmap.txt")
+names(params) <- c("s","N", "recMap", "mutMap", "exonMap", "seed")
+
+# setwd("/media/nathan/T7/BGSdemo/humanEquilData")
+# master <- data.table()
+# count <- 0
+# totalCount <- length(list.files())
+# done <- c()
+# for(file in list.files()){
+#   count <- count + 1
+#   if(count %% 100 == 0) print(paste(count, " of ", totalCount))
+#   par <- params %>% filter(paste(seed,".csv",sep="")==file)
+#   df <- fread(file) %>% as.matrix()
+#   numsum <- nrow(df)
+#   sfs <- colSums(df)
+#   foo <- paste(par$s,par$N)
+#   if(foo %in% done){
+#     # break
+#     master <- master %>% mutate(numberSummed = if_else(par$s == s & par$N == N,
+#                                              numberSummed + numsum,
+#                                              numberSummed),
+#                       afs = if_else(par$s == s & par$N == N,
+#                                     afs + sfs[obs+1],
+#                                     afs))
+#   }else{
+#     done <- c(done, foo)
+#     master <- dplyr::bind_rows(master,
+#                                data.table(s = par$s,
+#                                           N = par$N,
+#                                           seed = par$seed,
+#                                           numberSummed = numsum,
+#                                           obs = 0:(length(sfs)-1),
+#                                           afs = sfs))
+#   }
+# }
+setwd("/media/nathan/T7/BGSdemo/")
+# save(master, file = "equilHuman.RData")
+load(file = "equilHuman.RData")
+df <- master %>% mutate(afs = afs / numberSummed) %>% 
+  select(-seed) 
+# %>%  filter(obs != 0 & obs != 2 * N)
+df %>% mutate(theta = 4 * N * 1e-8 * 1e6) %>% 
+  filter(obs == 2 * N)
+
+ggplot(df) + 
+  geom_line(aes(x=obs, y = afs, color = as.factor(s))) + 
+  facet_wrap(vars(N), scales = "free") + 
+  scale_y_log10()
+
+setwd("/media/nathan/T7/BGSdemo/parsedequilHuman")
+for(curs in unique(df$s)){
+  for(curN in unique(df$N)){
+    tmp <- df %>% filter(s == curs,
+                         N == curN)
+    fwrite(list(tmp$afs),paste(curs,"_",curN,".csv",sep=""))
+  }
+}
+
 setwd("~/Documents/GitHub/BGSdemo/validation/fwdpy/EquilibriumSims")
 params <- fread("morereps.txt")
 names(params) <- c("s","N","seed")

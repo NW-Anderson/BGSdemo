@@ -120,9 +120,9 @@ for curwi in ["wi1e5.csv","wi5e4.csv"]:
             # todo i think the correct thing is tp divide the previous lines by 2
             # regular theta for a single site and span normalized projData
             
-            ax[i,j].plot(fs, ".-", ms=8, lw=1, label="BGS")
-            ax[i,j].plot(projData, "x-", ms=8, lw=1, label="fwdpy")
-            ax[i,j].plot(fs_indep, "+-", ms=8, lw=1, label="single locus")
+            ax[i,j].plot(fs[0:21], ".-", ms=8, lw=1, label="BGS")
+            ax[i,j].plot(projData[0:21], "x-", ms=8, lw=1, label="fwdpy")
+            ax[i,j].plot(fs_indep[0:21], "+-", ms=8, lw=1, label="single locus")
             ax[i,j].set_title("s = " + str(curs) + ", N = " + str(int(curN)))
             ax[i,j].set_yscale('log')
             if np.logical_and(i == 2, j == 2):

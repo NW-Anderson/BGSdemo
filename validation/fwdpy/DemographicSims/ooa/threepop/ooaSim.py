@@ -1,0 +1,205 @@
+import numpy as np
+import fwdpy11
+import time
+from dataclasses import dataclass
+import sys
+from typing import List
+from collections import defaultdict
+import pickle
+from datetime import datetime
+import argparse
+# import msprime
+import os
+import demes
+# test
+# import demesdraw
+
+# test
+# os.chdir("/home/nathan/Documents/GitHub/BGSdemo/validation/fwdpy/DemographicSims/ooa")
+
+def _convert_to_generations(g, sample_times=None):
+    """
+    Takes a deme graph that is not in time units of generations and converts
+    times to generations, using the time units and generation times given.
+    """
+    if g.time_units == "generations":
+        return g, sample_times
+    else:
+        for ii, sample_time in enumerate(sample_times):
+            sample_times[ii] = sample_time / g.generation_time
+        g = g.in_generations()
+        return g, sample_times
+
+def eprint(*args, **kwargs):
+    print(*args, file=sys.stderr, **kwargs)
+    sys.stderr.flush()
+
+
+def current_time():
+    return " [" + datetime.strftime(datetime.now(), "%Y-%m-%d %H:%M:%S") + "]"
+
+
+def make_parser():
+    ADHF = argparse.ArgumentDefaultsHelpFormatter
+    parser = argparse.ArgumentParser("flank_simulation.py", formatter_class=ADHF)
+    parser.add_argument("--seed", required=True, type=int)
+    optional = parser.add_argument_group("Optional")
+    optional.add_argument(
+        "--demes_graph",
+        "-yaml",
+        type=str,
+        default="demo.yaml",
+        help="Diploid population size, defaults to 10,000.",
+    )
+    optional.add_argument(
+        "--mean_sel_coef",
+        "-means",
+        type=float,
+        default = -0.002,
+        help="Mean of gamma dfe",
+    )
+    return parser
+
+def allele_frequencies(ts, sample_sets=None):
+    if sample_sets is None:
+       sample_sets = [ts.samples()] 
+    n = np.array([len(x) for x in sample_sets])
+    def f(x):
+       return x / n
+    return ts.sample_count_stat(sample_sets, f, len(sample_sets), windows='sites', polarised=True, mode='site', strict=False, span_normalise=False)
+
+@dataclass
+class Recorder:
+    
+    
+    def __call__(self, pop, sampler):
+        if pop.generation % 1000 == 0:
+            eprint(current_time(), f"at generation {pop.generation}")
+    
+def runsim(args):
+    """
+    args: The parsed arguments
+    Ne: The effective population size
+
+    Returns a tree sequence
+    """
+    # Set the rng with the given seed
+    rng = fwdpy11.GSLrng(args.seed)
+    mean = - args.mean_sel_coef
+    yaml = args.demes_graph
+    scaling = 1
+    L = 1e6
+    r = 1e-8
+    u = 1e-8
+    
+    
+    # test params
+    # rng = fwdpy11.GSLrng(1)
+    # mean = - 0.01
+    # yaml = "ooa.yaml"    
+
+    graph = demes.load(yaml)
+    
+    # test
+    # demesdraw.tubes(graph);
+    
+    U = u * L
+    R = r * L
+
+    rec_regions = [fwdpy11.PoissonInterval(0, L, L * r * scaling)]
+    sel_regions = [
+        fwdpy11.ConstantS(
+            beg=0, end=L, weight=1, s=mean * scaling, h=1
+        )
+    ]
+
+    demography = fwdpy11.ForwardDemesGraph.from_demes(graph, 20, burnin_is_exact=False)
+    # # Initialize the population
+    # Ne = int(population_size / scaling)
+    # # Ne = int(5e2)
+    # pop = fwdpy11.DiploidPopulation(Ne, L)
+    pop = fwdpy11.DiploidPopulation(demography.initial_sizes, L)
+    
+    # burnin = 20 * Ne
+    # sampling = 10 * Ne  # number of sampling generations
+    # sampling = 100
+    # simlen = burnin + sampling
+    # eprint(current_time(), "total simulation length:", simlen)
+    eprint(current_time(), "total simulation length:", demography.final_generation)
+
+    pdict = {
+        # Multiplicative selection model
+        "gvalue": fwdpy11.Multiplicative(2.0),
+        # Rates: (neutral, selection, recombination)
+        "rates": (0.0, U, None),
+        "nregions": [],
+        # Selection within the non-recombining locus
+        "sregions": sel_regions,
+        # Recombination to the right of this locus
+        "recregions": rec_regions,
+        # Evolve a single deme of size N for 20*N generations
+        "demography": demography,
+        "simlen": demography.final_generation,
+    }
+    params = fwdpy11.ModelParams(**pdict)
+
+    recorder = Recorder()
+
+    eprint(current_time(), "starting simulation")
+    fwdpy11.evolvets(
+        rng,
+        pop,
+        params,
+        100,
+        recorder=recorder,
+        suppress_table_indexing=True,
+        preserve_first_generation=False,
+    )
+    eprint(current_time(), "finished simulation")
+
+    ts = pop.dump_tables_to_tskit()
+    
+    # todo add pseudo replicates
+    return ts,demography
+
+if __name__ == "__main__":
+    parser = make_parser()
+    args = parser.parse_args(sys.argv[1:])
+    seed = args.seed
+
+    # test params
+    # seed = 1
+    
+    eprint(
+        current_time(),
+        f"starting simulation for seed {args.seed}",
+    )
+
+    ts,demography = runsim(args)    
+    
+    ceuIndex = None
+    for deme in demography.demes_at_final_generation:
+        # print(demography.deme_labels[deme])
+        if demography.deme_labels[deme] == "CEU":
+            ceuIndex = deme
+        
+    afs = ts.allele_frequency_spectrum(sample_sets = [ts.samples(population_id=ceuIndex)],
+                                       windows=[0,5e5-1,5e5+1,1e6],
+                                       mode="branch", 
+                                       polarised=True, 
+                                       span_normalise=False)
+    
+    midAfs = afs[1]
+
+    np.savetxt(str(seed) + "_ceu.csv", midAfs, delimiter = ",")
+    
+    import random
+    ss = [random.sample(sorted(ts.samples(population_id=d)), int(1e2)) for d in demography.demes_at_final_generation]
+    
+    afs = ts.allele_frequency_spectrum(sample_sets = ss,
+                                       windows=[0,5e5-1,5e5+1,1e6],
+                                       mode="branch", 
+                                       polarised=True, 
+                                       span_normalise=False)
+
+    np.save(str(seed)+".npy",afs[1])
