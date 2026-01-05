@@ -183,14 +183,152 @@ def _get_demographic_events(g, demes_demo_events, sampled_demes):
 
     return demo_events, demes_present
 
+def _get_integration_parameters(g, demes_present, frozen_list, Ne=None):
+    """
+    Returns a list of size functions, migration matrices, integration times,
+    and lists frozen demes.
+    """
+    nu_funcs = []
+    integration_times = []
+    migration_matrices = []
+    frozen_demes = []
+
+    for interval, live_demes in sorted(demes_present.items())[::-1]:
+        # get intergration time for interval
+        T = (interval[0] - interval[1]) / 2 / Ne
+        if T == math.inf:
+            T = 0
+        integration_times.append(T)
+        # get frozen attributes
+        freeze = [d in frozen_list for d in live_demes]
+        frozen_demes.append(freeze)
+        # get nu_function or list of sizes (if all constant)
+        sizes = []
+        for d in live_demes:
+            sizes.append(_sizes_at_time(g, d, interval))
+        nu_func = _make_nu_func(sizes, T, Ne)
+        nu_funcs.append(nu_func)
+        # get migration matrix for interval
+        mig_mat = np.zeros((len(live_demes), len(live_demes)))
+        for ii, d_from in enumerate(live_demes):
+            for jj, d_to in enumerate(live_demes):
+                if d_from != d_to:
+                    m = _migration_rate_in_interval(g, d_from, d_to, interval)
+                    mig_mat[jj, ii] = 2 * Ne * m
+        migration_matrices.append(mig_mat)
+
+    return nu_funcs, migration_matrices, integration_times, frozen_demes
+
+def _make_nu_func(sizes, T, Ne):
+    """
+    Given the sizes at start and end of time interval, and the size function for
+    each deme, along with the integration time and reference Ne, return the
+    size function that gets passed to the moments integration routines.
+    """
+    if np.all([s[-1] == "constant" for s in sizes]):
+        # all constant
+        nu_func = [s[0] / Ne for s in sizes]
+    else:
+        nu_funcs_separated = []
+        for s in sizes:
+            if s[-1] == "constant":
+                assert s[0] == s[1]
+                nu_funcs_separated.append(lambda t, N0=s[0]: N0 / Ne)
+            elif s[-1] == "linear":
+                nu_funcs_separated.append(
+                    lambda t, N0=s[0], NF=s[1]: N0 / Ne + t / T * (NF - N0) / Ne
+                )
+            elif s[-1] == "exponential":
+                nu_funcs_separated.append(
+                    lambda t, N0=s[0], NF=s[1]: N0
+                    / Ne
+                    * np.exp(np.log(NF / N0) * t / T)
+                )
+            else:
+                raise ValueError(f"{s[-1]} not a valid size function")
+
+        def nu_func(t):
+            return [nu(t) for nu in nu_funcs_separated]
+
+        # check that this is correct, or if we have to "pin" parameters
+    return nu_func
+
+def _sizes_at_time(g, deme_id, time_interval):
+    """
+    Returns the start size, end size, and size function for given deme over the
+    given time interval.
+    """
+    for epoch in g[deme_id].epochs:
+        if epoch.start_time >= time_interval[0] and epoch.end_time <= time_interval[1]:
+            break
+    if epoch.size_function not in ["constant", "exponential", "linear"]:
+        raise ValueError(
+            "Can only intergrate constant, exponential, or linear size functions"
+        )
+    size_function = epoch.size_function
+
+    if size_function == "constant":
+        start_size = end_size = epoch.start_size
+
+    if epoch.start_time == time_interval[0]:
+        start_size = epoch.start_size
+    else:
+        if size_function == "exponential":
+            start_size = epoch.start_size * np.exp(
+                np.log(epoch.end_size / epoch.start_size)
+                * (epoch.start_time - time_interval[0])
+                / epoch.time_span
+            )
+        elif size_function == "linear":
+            frac = (epoch.start_time - time_interval[0]) / epoch.time_span
+            start_size = epoch.start_size + frac * (epoch.end_size - epoch.start_size)
+
+    if epoch.end_time == time_interval[1]:
+        end_size = epoch.end_size
+    else:
+        if size_function == "exponential":
+            end_size = epoch.start_size * np.exp(
+                np.log(epoch.end_size / epoch.start_size)
+                * (epoch.start_time - time_interval[1])
+                / epoch.time_span
+            )
+        elif size_function == "linear":
+            frac = (epoch.start_time - time_interval[1]) / epoch.time_span
+            end_size = epoch.start_size + frac * (epoch.end_size - epoch.start_size)
+
+    return start_size, end_size, size_function
+
+def _migration_rate_in_interval(g, source, dest, time_interval):
+    """
+    Get the migration rate from source to dest over the given time interval.
+    """
+    rate = 0
+    for mig in g.migrations:
+        try:  # if asymmetric migration
+            if mig.source == source and mig.dest == dest:
+                if (
+                    mig.start_time >= time_interval[0]
+                    and mig.end_time <= time_interval[1]
+                ):
+                    rate = mig.rate
+        except AttributeError:  # symmetric migration
+            if source in mig.demes and dest in mig.demes:
+                if (
+                    mig.start_time >= time_interval[0]
+                    and mig.end_time <= time_interval[1]
+                ):
+                    rate = mig.rate
+    return rate
+
+# todo find out what happens when I redefine these function names???
 # # s = curs
 # curN = censusSize
 # # positions = pointMassPosition
-fig, ax = plt.subplots(1, 1, figsize=(8, 4))
-ax.plot([B(pointMassPosition, u, s, t, r, 1e4, 5e5) for t in range(int(10 * censusSize))], "-", ms=8, lw=1, label="Neutral")
-ax.set_xlabel("Time in past")
-ax.set_ylabel("B(t)")
-ax.legend();
+# fig, ax = plt.subplots(1, 1, figsize=(8, 4))
+# ax.plot([B(pointMassPosition, u, s, t, r, 1e4, 5e5) for t in range(int(10 * censusSize))], "-", ms=8, lw=1, label="Neutral")
+# ax.set_xlabel("Time in past")
+# ax.set_ylabel("B(t)")
+# ax.legend();
 
 # for curs in [1e-3, 5e-3, 1e-2]:
 #     for curN in [1e3, 5e3, 1e4]:
@@ -217,7 +355,8 @@ for i in range(3):
         demo = demes.load(curdemo)
         if demo.time_units != "generations":
             demo = demo.in_generations()
-        # demesdraw.tubes(demo);
+        demesdraw.tubes(demo);
+        
         oldestEpoch, censusSize = getOldestEpoch(demo)
 
         f, ancTime, ancNe = bFromDemes(pointMassPosition, u, curs, r, regionSize, focalPos, curdemo, tol)
@@ -252,6 +391,8 @@ for i in range(3):
         nu_funcs, mig_mats, Ts, frozen_pops = _get_integration_parameters(
             demo, demes_present, list_of_frozen_demes, Ne=censusSize
         )
+        
+        # def _get_integration_parameters(g, demes_present, frozen_list, Ne=None):
         # old from here down
         
         cs = reversedCensusFun(curdemo, ancTime, ancNe)

@@ -224,6 +224,11 @@ midPoints = [(x + y)/2 for x,y,z in exonMutMap]
 # for curs in [1e-3, 5e-3, 1e-2]:
 #     for curN in [1e3, 5e3, 1e4]:
 os.chdir("/media/nathan/T7/BGSdemo/parsedequilHuman")
+focalPos = L/2
+
+os.chdir("/media/nathan/T7/BGSdemo/parsedequilHuman5027")
+focalPos = 50270000
+
 fig, ax = plt.subplots(3, 3, figsize=(16, 8), sharex=True, sharey=False)
 fig.text(0.5, 0.04, 'Allele Frequency', ha='center')
 fig.text(0.04, 0.5, 'Count', va='center', rotation='vertical')
