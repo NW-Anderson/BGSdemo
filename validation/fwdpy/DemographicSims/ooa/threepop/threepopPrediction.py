@@ -76,6 +76,14 @@ def getOldestEpoch(graph):
                 size = epoch.start_size
     return tme, size
             
+def _get_root_Ne(g):
+    # get root population and set Ne to root size
+    for deme_id, preds in g.predecessors().items():
+        if len(preds) == 0:
+            root_deme = deme_id
+            break
+    Ne = g[root_deme].epochs[0].start_size
+    return Ne
     
 def censusFun(demesFile):
     graph = demes.load(demesFile)
@@ -183,6 +191,144 @@ def _get_demographic_events(g, demes_demo_events, sampled_demes):
 
     return demo_events, demes_present
 
+import warnings
+
+def _set_up_selection_dicts(gamma, h):
+    if type(gamma) is dict:
+        gamma_dict = copy.copy(gamma)
+        if "_default" not in gamma_dict:
+            gamma_dict["_default"] = 0
+    else:
+        gamma_dict = {"_default": gamma}
+    if h is None:
+        h_dict = {"_default": 0.5}
+    elif type(h) is dict:
+        h_dict = copy.copy(h)
+        if "_default" not in h_dict:
+            h_dict["_default"] = 0.5
+    else:
+        h_dict = {"_default": h}
+    return gamma_dict, h_dict
+
+def _compute_sfs(
+    demo_events,
+    demes_present,
+    deme_sample_sizes,
+    nu_funcs,
+    migration_matrices,
+    integration_times,
+    frozen_demes,
+    theta=1.0,
+    gamma=None,
+    h=None,
+    reversible=False,
+):
+    """
+    Integrates using moments to find the SFS for given demo events, etc
+    """
+    if reversible is True:
+        assert type(theta) is list
+        assert len(theta) == 2
+        # theta is forward and backward rates, as list of length 2
+        theta_fd = theta[0]
+        theta_bd = theta[1]
+        assert theta_fd < 1 and theta_bd < 1
+        mask_corners = False
+    else:
+        # theta is a scalar
+        assert isinstance(theta, (int, float))
+        mask_corners = True
+
+    integration_intervals = sorted(list(demes_present.keys()))[::-1]
+    root_deme = demes_present[integration_intervals[0]][0]
+
+    # set up gamma and h as a dictionary covering all demes
+    gamma_dict, h_dict = _set_up_selection_dicts(gamma, h)
+
+    # set up initial steady-state 1D SFS for ancestral deme
+    n0 = deme_sample_sizes[integration_intervals[0]][0]
+    if gamma is None:
+        gamma0 = 0.0
+    else:
+        if root_deme in gamma_dict:
+            gamma0 = gamma_dict[root_deme]
+        else:
+            gamma0 = gamma_dict["_default"]
+    if h is None:
+        h0 = 0.5
+    else:
+        if root_deme in h_dict:
+            h0 = h_dict[root_deme]
+        else:
+            h0 = h_dict["_default"]
+
+    if reversible is False:
+        fs = theta * moments.LinearSystem_1D.steady_state_1D(n0, gamma=gamma0, h=h0)
+    else:
+        fs = moments.LinearSystem_1D.steady_state_1D_reversible(
+            n0, gamma=gamma0, theta_fd=theta_fd, theta_bd=theta_bd
+        )
+        if h0 != 0.5:
+            raise ValueError("can only use h=0.5 with reversible mutation model")
+    fs = moments.Spectrum(fs, pop_ids=[root_deme], mask_corners=mask_corners)
+
+    # for each set of demographic events and integration epochs, step through
+    # integration, apply events, and then reorder populations to align with demes
+    # present in the next integration epoch
+    for (T, nu, M, frozen, interval) in zip(
+        integration_times,
+        nu_funcs,
+        migration_matrices,
+        frozen_demes,
+        integration_intervals,
+    ):
+        if T > 0:
+            if gamma is not None:
+                gamma_int = [
+                    gamma_dict[pid] if pid in gamma_dict else gamma_dict["_default"]
+                    for pid in fs.pop_ids
+                ]
+                h_int = [
+                    h_dict[pid] if pid in h_dict else h_dict["_default"]
+                    for pid in fs.pop_ids
+                ]
+            else:
+                gamma_int = None
+                h_int = None
+            if reversible:
+                fs.integrate(
+                    nu,
+                    T,
+                    m=M,
+                    frozen=frozen,
+                    gamma=gamma_int,
+                    h=h_int,
+                    finite_genome=True,
+                    theta_fd=theta_fd,
+                    theta_bd=theta_bd,
+                )
+            else:
+                fs.integrate(
+                    nu, T, m=M, frozen=frozen, gamma=gamma_int, h=h_int, theta=theta
+                )
+
+        events = demo_events[interval[1]]
+        for event in events:
+            fs = _apply_event(fs, event, interval[1], deme_sample_sizes, demes_present)
+
+        if interval[1] > 0:
+            # rearrange to next order of demes
+            next_interval = integration_intervals[
+                [x[0] for x in integration_intervals].index(interval[1])
+            ]
+            next_deme_order = demes_present[next_interval]
+            assert fs.ndim == len(next_deme_order)
+            assert np.all([d in next_deme_order for d in fs.pop_ids])
+            fs = _reorder_fs(fs, next_deme_order)
+
+    return fs
+
+
 def _get_integration_parameters(g, demes_present, frozen_list, Ne=None):
     """
     Returns a list of size functions, migration matrices, integration times,
@@ -192,6 +338,15 @@ def _get_integration_parameters(g, demes_present, frozen_list, Ne=None):
     integration_times = []
     migration_matrices = []
     frozen_demes = []
+    
+    if Ne is None:
+        Ne = _get_root_Ne(g)
+    else:
+        if Ne != _get_root_Ne(g):
+            warnings.warn(
+                "Input Ne is different from root population initial size, "
+                "subsequent population size scaling may be incorrect"
+            )
 
     for interval, live_demes in sorted(demes_present.items())[::-1]:
         # get intergration time for interval
@@ -320,15 +475,258 @@ def _migration_rate_in_interval(g, source, dest, time_interval):
                     rate = mig.rate
     return rate
 
+def _get_deme_sample_sizes(
+    g, demo_events, sampled_demes, sample_sizes, demes_present, unsampled_n=4
+):
+    """
+    Returns sample sizes within each deme that is present within each interval.
+    Deme samples sizes can change if there are pulse or branching events, e.g.,
+    but will be constant over the integration epochs.
+    This works by climbing up the demography from most recent integration epoch to
+    most distant. Unsampled leaf demes get size unsampled_ns, and others have size
+    given by sample_sizes.
+    """
+    ns = {}
+    for interval, deme_ids in demes_present.items():
+        ns[interval] = [0 for _ in deme_ids]
+
+    # initialize with sampled demes and unsampled, marginalized demes
+    for deme_id, n in zip(sampled_demes, sample_sizes):
+        for interval in ns.keys():
+            if interval[0] <= g[deme_id].start_time:
+                ns[interval][demes_present[interval].index(deme_id)] += n
+
+    # Climb up the demographic events, taking into account pulses, branches, etc
+    # when we add a new deme, determine base n from its successors (split, merge,
+    # admixture), and propagate up. Similarly, propagate up other events that add
+    # lineages to a branch (branches, pulses). Marginalize events add the deme
+    # sample size with unsampled_n.
+    for t, events in sorted(demo_events.items()):
+        for event in events[::-1]:
+            if event[0] == "marginalize":
+                deme_id = event[1]
+                # add unsampled deme
+                for interval in ns.keys():
+                    if (
+                        interval[0] <= g[deme_id].start_time
+                        and interval[1] >= g[deme_id].end_time
+                    ):
+                        ns[interval][
+                            demes_present[interval].index(deme_id)
+                        ] += unsampled_n
+            elif event[0] == "split":
+                # add the parental deme
+                deme_id = event[1]
+                children = event[2]
+                for interval in sorted(ns.keys()):
+                    if interval[0] == g[deme_id].end_time:
+                        # get child sizes at time of split
+                        children_ns = {
+                            child: ns[interval][demes_present[interval].index(child)]
+                            for child in children
+                        }
+                    if (
+                        interval[0] <= g[deme_id].start_time
+                        and interval[1] >= g[deme_id].end_time
+                    ):
+                        for child in children:
+                            ns[interval][
+                                demes_present[interval].index(deme_id)
+                            ] += children_ns[child]
+            elif event[0] == "branch":
+                # add child n to parent n for integration epochs above t
+                deme_id = event[1]
+                child = event[2]
+                for interval in sorted(ns.keys()):
+                    if interval[0] == t:
+                        # get child sizes at time of split
+                        child_ns = ns[interval][demes_present[interval].index(child)]
+                    if (
+                        interval[0] <= g[deme_id].start_time
+                        and interval[1] >= g[deme_id].end_time
+                        and interval[1] >= t
+                    ):
+                        ns[interval][demes_present[interval].index(deme_id)] += child_ns
+            elif event[0] == "pulse":
+                # figure out how much the admix_in_place needs from child to parent
+                sources = event[1]
+                dest = event[2]
+                for source in sources:
+                    for interval in sorted(ns.keys()):
+                        if interval[1] == t:
+                            dest_size = ns[interval][
+                                demes_present[interval].index(dest)
+                            ]
+                        if (
+                            interval[0] <= g[source].start_time
+                            and interval[1] >= g[source].end_time
+                            and interval[1] >= t
+                        ):
+                            ns[interval][
+                                demes_present[interval].index(source)
+                            ] += dest_size
+            elif event[0] == "merge":
+                # each parent gets number of lineages in child
+                parents = event[1]
+                child = event[3]
+                for interval in sorted(ns.keys()):
+                    if interval[0] == t:
+                        child_size = ns[interval][demes_present[interval].index(child)]
+                    for parent in parents:
+                        if (
+                            interval[0] <= g[parent].start_time
+                            and interval[1] >= g[parent].end_time
+                        ):
+                            ns[interval][
+                                demes_present[interval].index(parent)
+                            ] += child_size
+            elif event[0] == "admix":
+                # each parent gets num child lineages for all epochs above t
+                parents = event[1]
+                child = event[3]
+                for interval in sorted(ns.keys()):
+                    if interval[0] == t:
+                        child_size = ns[interval][demes_present[interval].index(child)]
+                    for parent in parents:
+                        if (
+                            interval[0] <= g[parent].start_time
+                            and interval[1] >= g[parent].end_time
+                            and interval[1] >= t
+                        ):
+                            ns[interval][
+                                demes_present[interval].index(parent)
+                            ] += child_size
+    return ns
+
+def _compute_sfs(
+    demo_events,
+    demes_present,
+    deme_sample_sizes,
+    nu_funcs,
+    migration_matrices,
+    integration_times,
+    frozen_demes,
+    theta=1.0,
+    gamma=None,
+    h=None,
+    reversible=False,
+):
+    """
+    Integrates using moments to find the SFS for given demo events, etc
+    """
+    if reversible is True:
+        assert type(theta) is list
+        assert len(theta) == 2
+        # theta is forward and backward rates, as list of length 2
+        theta_fd = theta[0]
+        theta_bd = theta[1]
+        assert theta_fd < 1 and theta_bd < 1
+        mask_corners = False
+    else:
+        # theta is a scalar
+        assert isinstance(theta, (int, float))
+        mask_corners = True
+
+    integration_intervals = sorted(list(demes_present.keys()))[::-1]
+    root_deme = demes_present[integration_intervals[0]][0]
+
+    # set up gamma and h as a dictionary covering all demes
+    gamma_dict, h_dict = _set_up_selection_dicts(gamma, h)
+
+    # set up initial steady-state 1D SFS for ancestral deme
+    n0 = deme_sample_sizes[integration_intervals[0]][0]
+    if gamma is None:
+        gamma0 = 0.0
+    else:
+        if root_deme in gamma_dict:
+            gamma0 = gamma_dict[root_deme]
+        else:
+            gamma0 = gamma_dict["_default"]
+    if h is None:
+        h0 = 0.5
+    else:
+        if root_deme in h_dict:
+            h0 = h_dict[root_deme]
+        else:
+            h0 = h_dict["_default"]
+
+    if reversible is False:
+        fs = theta * moments.LinearSystem_1D.steady_state_1D(n0, gamma=gamma0, h=h0)
+    else:
+        fs = moments.LinearSystem_1D.steady_state_1D_reversible(
+            n0, gamma=gamma0, theta_fd=theta_fd, theta_bd=theta_bd
+        )
+        if h0 != 0.5:
+            raise ValueError("can only use h=0.5 with reversible mutation model")
+    fs = moments.Spectrum(fs, pop_ids=[root_deme], mask_corners=mask_corners)
+
+    # for each set of demographic events and integration epochs, step through
+    # integration, apply events, and then reorder populations to align with demes
+    # present in the next integration epoch
+    for (T, nu, M, frozen, interval) in zip(
+        integration_times,
+        nu_funcs,
+        migration_matrices,
+        frozen_demes,
+        integration_intervals,
+    ):
+        if T > 0:
+            if gamma is not None:
+                gamma_int = [
+                    gamma_dict[pid] if pid in gamma_dict else gamma_dict["_default"]
+                    for pid in fs.pop_ids
+                ]
+                h_int = [
+                    h_dict[pid] if pid in h_dict else h_dict["_default"]
+                    for pid in fs.pop_ids
+                ]
+            else:
+                gamma_int = None
+                h_int = None
+            if reversible:
+                fs.integrate(
+                    nu,
+                    T,
+                    m=M,
+                    frozen=frozen,
+                    gamma=gamma_int,
+                    h=h_int,
+                    finite_genome=True,
+                    theta_fd=theta_fd,
+                    theta_bd=theta_bd,
+                )
+            else:
+                fs.integrate(
+                    nu, T, m=M, frozen=frozen, gamma=gamma_int, h=h_int, theta=theta
+                )
+
+        events = demo_events[interval[1]]
+        for event in events:
+            fs = _apply_event(fs, event, interval[1], deme_sample_sizes, demes_present)
+
+        if interval[1] > 0:
+            # rearrange to next order of demes
+            next_interval = integration_intervals[
+                [x[0] for x in integration_intervals].index(interval[1])
+            ]
+            next_deme_order = demes_present[next_interval]
+            assert fs.ndim == len(next_deme_order)
+            assert np.all([d in next_deme_order for d in fs.pop_ids])
+            fs = _reorder_fs(fs, next_deme_order)
+
+    return fs
+
+
+
 # todo find out what happens when I redefine these function names???
-# # s = curs
-# curN = censusSize
-# # positions = pointMassPosition
-# fig, ax = plt.subplots(1, 1, figsize=(8, 4))
-# ax.plot([B(pointMassPosition, u, s, t, r, 1e4, 5e5) for t in range(int(10 * censusSize))], "-", ms=8, lw=1, label="Neutral")
-# ax.set_xlabel("Time in past")
-# ax.set_ylabel("B(t)")
-# ax.legend();
+s = curs
+curN = censusSize
+# positions = pointMassPosition
+fig, ax = plt.subplots(1, 1, figsize=(8, 4))
+ax.plot([B(pointMassPosition, u, s, t, r, 1e4, 5e5) for t in range(int(10 * censusSize))], "-", ms=8, lw=1, label="Neutral")
+ax.set_xlabel("Time in past")
+ax.set_ylabel("B(t)")
+ax.legend();
 
 # for curs in [1e-3, 5e-3, 1e-2]:
 #     for curN in [1e3, 5e3, 1e4]:
@@ -392,7 +790,44 @@ for i in range(3):
             demo, demes_present, list_of_frozen_demes, Ne=censusSize
         )
         
-        # def _get_integration_parameters(g, demes_present, frozen_list, Ne=None):
+        unsampled_n = 4
+        sample_sizes = [sample_size]
+        deme_sample_times = None
+        
+        if unsampled_n < 4:
+            raise ValueError("unsampled_n must be greater than 3")
+
+        sampled_deme_end_times = [demo[d].end_time for d in sampled_pops]
+        if deme_sample_times is None:
+            deme_sample_times = sampled_deme_end_times
+
+        # if any sample sizes are less than unsample_n, we increase and project after
+        sim_sample_sizes = []
+        for d, n, t in zip(sampled_pops, sample_sizes, deme_sample_times):
+            sim_sample_sizes.append(max(n, unsampled_n))
+            if t < demo[d].end_time or t >= demo[d].start_time:
+                raise ValueError("sample time for {deme} must be within its time span")
+
+        # get the sample sizes within each deme, given sample sizes
+        deme_sample_sizes = _get_deme_sample_sizes(
+            demo,
+            demo_events,
+            sampled_pops,
+            sim_sample_sizes,
+            demes_present,
+            unsampled_n=unsampled_n,
+        )
+
+        # compute the SFS
+        fs = _compute_sfs(
+            demo_events,
+            demes_present,
+            deme_sample_sizes,
+            nu_funcs,
+            mig_mats,
+            Ts,
+            frozen_pops,
+        )
         # old from here down
         
         cs = reversedCensusFun(curdemo, ancTime, ancNe)
