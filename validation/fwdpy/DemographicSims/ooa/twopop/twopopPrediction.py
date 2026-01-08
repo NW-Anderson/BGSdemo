@@ -120,13 +120,16 @@ unsampled_n=4
 gamma=None
 s=None
 h=None
-theta=None
+theta=1
 u=None
 reversible=False
 L=1
 
-# new params
+import copy
+import warnings
 
+# new params
+bgs_Ne = ancNe
 
 def SFS_bgs(
     g,
@@ -138,7 +141,7 @@ def SFS_bgs(
     gamma=None,
     s=None,
     h=None,
-    theta=None,
+    theta=1,
     u=None,
     reversible=False,
     L=1,
@@ -289,7 +292,7 @@ def SFS_bgs(
             raise ValueError("sample time for {deme} must be within its time span")
 
     # get reference Ne from demes model
-    Ne = _get_root_Ne(g)
+    cs_Ne = _get_root_Ne(g)
 
     # if (unscaled) s is provided, convert into (scaled) gamma selection coefficients
     if s is not None:
@@ -393,22 +396,21 @@ def SFS_bgs(
                 f"Epoch {epoch} has demes {epoch_demes}."
             )
 
-    if ancNe is not None:
-        Ne = ancNe
+
     # get the list of size functions, migration matrices, and frozen attributes from
     # the deme graph and event times, matching the integration times
-    nu_funcs, mig_mats, Ts, frozen_pops = _get_integration_parameters(
-        g, demes_present, list_of_frozen_demes, Ne=Ne
+    # nu_funcs, mig_mats, Ts, frozen_pops = _get_integration_parameters(
+    #     g, demes_present, list_of_frozen_demes, Ne=cs_Ne
+    # )
+    
+    # nu_funcs_bgs, mig_mats_bgs, Ts_bgs, frozen_pops_bgs = _get_integration_parameters(
+    #     g, demes_present, list_of_frozen_demes, Ne=ancNe
+    # )
+    
+    # nu_funcs_test, mig_mats_test, Ts_test, frozen_pops_test 
+    nu_funcs, mig_mats, Ts, frozen_pops = _get_integration_parameters_bgs(
+        g, demes_present, list_of_frozen_demes, bgs_Ne
     )
-    
-    nu_funcs_bgs, mig_mats_bgs, Ts, frozen_pops_bgs = _get_integration_parameters(
-        g, demes_present, list_of_frozen_demes, Ne=ancNe
-    )
-    
-    rescale_nu_funcs_bgs(nu_funcs_bgs, ancNe)
-    rescale_nu(nu_funcs, f, )
-    
-
     # get the sample sizes within each deme, given sample sizes
     deme_sample_sizes = _get_deme_sample_sizes(
         g,
@@ -448,18 +450,117 @@ def SFS_bgs(
 
     return fs
 
-def rescale_nu_funcs_bgs(g, nu_funcs_bgs, ancNe):
-    cs = _get_root_Ne(g)
-    r = ancNe / cs
+bgs_Ne = ancNe
+frozen_list = list_of_frozen_demes
+
+def _get_integration_parameters_bgs(g, demes_present, frozen_list, bgs_Ne, cs_Ne=None):
+    """
+    Returns a list of size functions, migration matrices, integration times,
+    and lists frozen demes.
+    """
+    nu_funcs = []
+    integration_times = []
+    migration_matrices = []
+    frozen_demes = []
+
+    if cs_Ne is None:
+        cs_Ne = _get_root_Ne(g)
+    else:
+        if cs_Ne != _get_root_Ne(g):
+            warnings.warn(
+                "Input cs_Ne is different from root population initial size, "
+                "subsequent population size scaling may be incorrect"
+            )
     
-    tmp = []
-    for x in nu_funcs_bgs:
-        if type(x) is list:
-            tmp.append([r * y for y in x])
+    T_elapsed = 0
+    for interval, live_demes in sorted(demes_present.items())[::-1]:
+        # get intergration time for interval
+        T = (interval[0] - interval[1]) / 2 / bgs_Ne
+        if T == math.inf:
+            T = 0
+        integration_times.append(T)
+        # get frozen attributes
+        freeze = [d in frozen_list for d in live_demes]
+        frozen_demes.append(freeze)
+        # get nu_function or list of sizes (if all constant)
+        sizes = []
+        for d in live_demes:
+            sizes.append(_sizes_at_time(g, d, interval))
+        # nu_func = _make_nu_func(sizes, T, cs_Ne)
+        nu_func = _make_nu_func_bgs(sizes, T, cs_Ne, T_elapsed)
+        T_elapsed += T
+
+        nu_funcs.append(nu_func)
+        # get migration matrix for interval
+        mig_mat = np.zeros((len(live_demes), len(live_demes)))
+        for ii, d_from in enumerate(live_demes):
+            for jj, d_to in enumerate(live_demes):
+                if d_from != d_to:
+                    m = _migration_rate_in_interval(g, d_from, d_to, interval)
+                    mig_mat[jj, ii] = 2 * bgs_Ne * m
+        migration_matrices.append(mig_mat)
+
+    return nu_funcs, migration_matrices, integration_times, frozen_demes
+
+def _make_nu_func_bgs(sizes, T, Ne, T_elapsed):
+    """
+    Given the sizes at start and end of time interval, and the size function for
+    each deme, along with the integration time and reference Ne, return the
+    size function that gets passed to the moments integration routines.
+    """
+    if np.all([s[-1] == "constant" for s in sizes]):
+        # all constant
+        if T == 0:
+            nu_func = [s[0] / Ne for s in sizes]
         else:
-            tmp.append([lambda t: r * y(t) for y in x])
+            nu_funcs_separated = []
+            for s in sizes:
+                assert s[0] == s[1]
+                nu_funcs_separated.append(lambda t, N0=s[0]: (N0 / Ne) * f(T_elapsed + t)[0])
+                
+            def nu_func(t):
+                return [nu(t) for nu in nu_funcs_separated]
+    else:
+        nu_funcs_separated = []
+        for s in sizes:
+            if s[-1] == "constant":
+                assert s[0] == s[1]
+                nu_funcs_separated.append(lambda t, N0=s[0]: N0 / Ne)
+            elif s[-1] == "linear":
+                nu_funcs_separated.append(
+                    lambda t, N0=s[0], NF=s[1]: N0 / Ne + t / T * (NF - N0) / Ne
+                )
+            elif s[-1] == "exponential":
+                nu_funcs_separated.append(
+                    lambda t, N0=s[0], NF=s[1]: N0
+                    / Ne
+                    * np.exp(np.log(NF / N0) * t / T)
+                )
+            else:
+                raise ValueError(f"{s[-1]} not a valid size function")
 
+        def nu_func(t):
+            return [nu(t) for nu in nu_funcs_separated]
 
+        # check that this is correct, or if we have to "pin" parameters
+    return nu_func
+
+fig, ax = plt.subplots(1, 1, figsize=(8, 4))
+ax.plot(np.arange(0,Ts_test[1], 0.001),[nu_funcs_test[1](t) for t in np.arange(0,Ts_test[1], 0.001)], "-", ms=8, lw=1, label="nu_func1")
+ax.plot(np.arange(0,Ts_test[2], 0.001),[nu_funcs_test[2](t) for t in np.arange(0,Ts_test[2], 0.001)], "-", ms=8, lw=1, label="nu_func2")
+# ax.plot(np.arange(0,T, 0.001),[f(t) for t in np.arange(0,T, 0.001)], "-", ms=8, lw=1, label="f")
+ax.set_xlabel("Time in past")
+ax.set_ylabel("value")
+ax.set_title("s = " + str(curs) + ", demo = " + curdemo)
+ax.legend();
+
+fig, ax = plt.subplots(1, 1, figsize=(8, 4))
+ax.plot(np.arange(0,T, 0.001),[test(t) for t in np.arange(0,T, 0.001)], "-", ms=8, lw=1, label="nu_func")
+# ax.plot(np.arange(0,T, 0.001),[f(t) for t in np.arange(0,T, 0.001)], "-", ms=8, lw=1, label="f")
+ax.set_xlabel("Time in past")
+ax.set_ylabel("value")
+ax.set_title("s = " + str(curs) + ", demo = " + curdemo)
+ax.legend();
 
 # todo find out what happens when I redefine these function names???
 s = curs
@@ -471,6 +572,8 @@ ax.set_xlabel("Time in past")
 ax.set_ylabel("B(t)")
 ax.legend();
 
+curs = 1e-3
+curdemo = 'ooaTwoPop.yaml'
 # for curs in [1e-3, 5e-3, 1e-2]:
 #     for curN in [1e3, 5e3, 1e4]:
 fig, ax = plt.subplots(3, 1, figsize=(16, 8), sharex=True, sharey=False)
@@ -502,13 +605,11 @@ for i in range(3):
 
         f, ancTime, ancNe = bFromDemes(pointMassPosition, u, curs, r, regionSize, focalPos, curdemo, tol)
         
-        sampled_pops = 
-        sample_sizes = [sample_size]
-        
         SFS_bgs(
            demo,
            sampled_demes=["CEU"],
-           sample_sizes=[sample_size]
+           sample_sizes=[sample_size],
+           theta = 1
        )
        
         # old from here down
