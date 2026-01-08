@@ -111,28 +111,29 @@ def reversedCensusFun(demesFile, ancTime, ancNe):
     cs = censusFun(demesFile)
     return lambda t: [x  / cs(ancTime)[0] for x in cs(ancTime - t * 2 * ancNe) if x != None]
 
-g = demo
-sampled_demes=['OOA']
-sample_sizes=[40]
-sample_times=None
-samples=None
-unsampled_n=4
-gamma=None
-s=None
-h=None
-theta=1
-u=None
-reversible=False
-L=1
+# g = demo
+# sampled_demes=['OOA']
+# sample_sizes=[40]
+# sample_times=None
+# samples=None
+# unsampled_n=4
+# gamma=None
+# s=None
+# h=None
+# theta=1
+# u=None
+# reversible=False
+# L=1
 
 import copy
 import warnings
 
 # new params
-bgs_Ne = ancNe
+# bgs_Ne = ancNe
 
 def SFS_bgs(
     g,
+    bgs_Ne,
     sampled_demes=None,
     sample_sizes=None,
     sample_times=None,
@@ -450,8 +451,8 @@ def SFS_bgs(
 
     return fs
 
-bgs_Ne = ancNe
-frozen_list = list_of_frozen_demes
+# bgs_Ne = ancNe
+# frozen_list = list_of_frozen_demes
 
 def _get_integration_parameters_bgs(g, demes_present, frozen_list, bgs_Ne, cs_Ne=None):
     """
@@ -545,35 +546,35 @@ def _make_nu_func_bgs(sizes, T, Ne, T_elapsed):
         # check that this is correct, or if we have to "pin" parameters
     return nu_func
 
-fig, ax = plt.subplots(1, 1, figsize=(8, 4))
-ax.plot(np.arange(0,Ts_test[1], 0.001),[nu_funcs_test[1](t) for t in np.arange(0,Ts_test[1], 0.001)], "-", ms=8, lw=1, label="nu_func1")
-ax.plot(np.arange(0,Ts_test[2], 0.001),[nu_funcs_test[2](t) for t in np.arange(0,Ts_test[2], 0.001)], "-", ms=8, lw=1, label="nu_func2")
-# ax.plot(np.arange(0,T, 0.001),[f(t) for t in np.arange(0,T, 0.001)], "-", ms=8, lw=1, label="f")
-ax.set_xlabel("Time in past")
-ax.set_ylabel("value")
-ax.set_title("s = " + str(curs) + ", demo = " + curdemo)
-ax.legend();
+# fig, ax = plt.subplots(1, 1, figsize=(8, 4))
+# ax.plot(np.arange(0,Ts_test[1], 0.001),[nu_funcs_test[1](t) for t in np.arange(0,Ts_test[1], 0.001)], "-", ms=8, lw=1, label="nu_func1")
+# ax.plot(np.arange(0,Ts_test[2], 0.001),[nu_funcs_test[2](t) for t in np.arange(0,Ts_test[2], 0.001)], "-", ms=8, lw=1, label="nu_func2")
+# # ax.plot(np.arange(0,T, 0.001),[f(t) for t in np.arange(0,T, 0.001)], "-", ms=8, lw=1, label="f")
+# ax.set_xlabel("Time in past")
+# ax.set_ylabel("value")
+# ax.set_title("s = " + str(curs) + ", demo = " + curdemo)
+# ax.legend();
 
-fig, ax = plt.subplots(1, 1, figsize=(8, 4))
-ax.plot(np.arange(0,T, 0.001),[test(t) for t in np.arange(0,T, 0.001)], "-", ms=8, lw=1, label="nu_func")
-# ax.plot(np.arange(0,T, 0.001),[f(t) for t in np.arange(0,T, 0.001)], "-", ms=8, lw=1, label="f")
-ax.set_xlabel("Time in past")
-ax.set_ylabel("value")
-ax.set_title("s = " + str(curs) + ", demo = " + curdemo)
-ax.legend();
+# fig, ax = plt.subplots(1, 1, figsize=(8, 4))
+# ax.plot(np.arange(0,T, 0.001),[test(t) for t in np.arange(0,T, 0.001)], "-", ms=8, lw=1, label="nu_func")
+# # ax.plot(np.arange(0,T, 0.001),[f(t) for t in np.arange(0,T, 0.001)], "-", ms=8, lw=1, label="f")
+# ax.set_xlabel("Time in past")
+# ax.set_ylabel("value")
+# ax.set_title("s = " + str(curs) + ", demo = " + curdemo)
+# ax.legend();
 
 # todo find out what happens when I redefine these function names???
-s = curs
-curN = censusSize
-# positions = pointMassPosition
-fig, ax = plt.subplots(1, 1, figsize=(8, 4))
-ax.plot([B(pointMassPosition, u, s, t, r, 1e4, 5e5) for t in range(int(10 * censusSize))], "-", ms=8, lw=1, label="Neutral")
-ax.set_xlabel("Time in past")
-ax.set_ylabel("B(t)")
-ax.legend();
+# s = curs
+# curN = censusSize
+# # positions = pointMassPosition
+# fig, ax = plt.subplots(1, 1, figsize=(8, 4))
+# ax.plot([B(pointMassPosition, u, s, t, r, 1e4, 5e5) for t in range(int(10 * censusSize))], "-", ms=8, lw=1, label="Neutral")
+# ax.set_xlabel("Time in past")
+# ax.set_ylabel("B(t)")
+# ax.legend();
 
-curs = 1e-3
-curdemo = 'ooaTwoPop.yaml'
+# curs = 1e-3
+# curdemo = 'ooaTwoPop.yaml'
 # for curs in [1e-3, 5e-3, 1e-2]:
 #     for curN in [1e3, 5e3, 1e4]:
 fig, ax = plt.subplots(3, 1, figsize=(16, 8), sharex=True, sharey=False)
@@ -586,12 +587,12 @@ for i in range(3):
         curs = [1e-3, 5e-3, 1e-2][i]
         curdemo = ["ooaTwoPop.yaml"][j]
         
-        # os.chdir("/media/nathan/T7/BGSdemo/parsedooaThreepopData")
+        os.chdir("/media/nathan/T7/BGSdemo/parsedooaTwoPopData")
 
-        # simData = pd.read_csv(str(curs) + "_" + str(curdemo) + ".csv", header = None)
-        # simData = simData[0].to_numpy()
-        # simData = moments.Spectrum(simData,data_folded=False) 
-        # projData = simData.project([proj_size])
+        simData = pd.read_csv(str(curs) + "_" + str(curdemo) + ".csv", header = None)
+        simData = simData[0].to_numpy()
+        simData = moments.Spectrum(simData,data_folded=False) 
+        projData = simData.project([proj_size])
         
         os.chdir("/home/nathan/Documents/GitHub/BGSdemo/validation/fwdpy/DemographicSims/ooa/twopop")
 
@@ -599,48 +600,40 @@ for i in range(3):
         demo = demes.load(curdemo)
         if demo.time_units != "generations":
             demo = demo.in_generations()
-        demesdraw.tubes(demo);
+        # demesdraw.tubes(demo);
         
         oldestEpoch, censusSize = getOldestEpoch(demo)
 
         f, ancTime, ancNe = bFromDemes(pointMassPosition, u, curs, r, regionSize, focalPos, curdemo, tol)
         
-        SFS_bgs(
+        fs = SFS_bgs(
            demo,
-           sampled_demes=["CEU"],
+           sampled_demes=["OOA"],
            sample_sizes=[sample_size],
-           theta = 1
+           theta = 1,
+           bgs_Ne = ancNe
        )
        
-        # old from here down
+        f = lambda t: [1]
+        fs_neu = SFS_bgs(
+            demo,
+            sampled_demes=["OOA"],
+            sample_sizes=[sample_size],
+            theta=1,
+            bgs_Ne = censusSize
+        )
         
-        cs = reversedCensusFun(curdemo, ancTime, ancNe)
-        
-        g = lambda t: [x * y for x,y in zip(f(t), cs(t))]
-        
-        fs = moments.Demographics1D.snm([sample_size])
-        fs.integrate(g, ancTime / 2 / ancNe)
-        
-        oldestEpoch, ancCensusSize = getOldestEpoch(demo)
-        ds = reversedCensusFun(curdemo, ancTime, ancCensusSize)
-        fs_neu = moments.Demographics1D.snm([proj_size])
-        fs_neu.integrate(ds, ancTime / 2 / ancCensusSize)
-        # fs_neu = moments.Demographics1D.snm([proj_size])
-        # fs_neu.integrate(cs, ancTime / 2 / ancTime)
-        # fs_neu = moments.Demographics1D.snm([proj_size])
-        # fs_neu.integrate(cs, ancTime / 2 / ancNe)
-        
-        sampled_demes = ["CEU"]
-
         ds = moments.Spectrum.from_demes(
-            curdemo, sampled_demes=sampled_demes, sample_sizes=[proj_size]
+            curdemo, 
+            sampled_demes=["OOA"], 
+            sample_sizes=[sample_size]
         )
 
         # normalizing so singletons have freq 1, cause thats all I can think of right now
         fs = fs * 8 * 1e-8 * ancNe
         projData = projData * 1e-8
-        fs_neu = fs_neu * 8 * 1e-8 * ancCensusSize   
-        ds = ds * 8 * 1e-8 * ancCensusSize
+        fs_neu = fs_neu * 8 * 1e-8 * censusSize   
+        ds = ds * 8 * 1e-8 * censusSize
         
         ax[i].plot(fs, ".-", ms=8, lw=1, label="BGS")
         ax[i].plot(projData, "x-", ms=8, lw=1, label="fwdpy")
@@ -651,6 +644,15 @@ for i in range(3):
         if np.logical_and(i == 2, j == 0):
             ax[i].legend();
             
+
+fig, ax = plt.subplots(1, 1, figsize=(8, 4))
+ax.plot(fs, ".-", ms=8, lw=1, label="BGS")
+ax.plot(fs_neu, "+-", ms=8, lw=1, label="neutral")
+ax.plot(ds, "*-", ms=8, lw=1, label="demes")
+ax.set_xlabel("Allele frequency")
+ax.set_ylabel("Density")
+ax.set_title("s = " + str(curs) + ", demo = " + curdemo)
+ax.legend();
 
 # moments.Plotting.plot_1d_comp_Poisson(fs*8e-4, projData*2e-8)
 
@@ -709,17 +711,17 @@ for curs in [1e-3, 5e-3, 1e-2]:
         fs = moments.Demographics1D.snm([sample_size])
         fs.integrate(g, ancTime / 2 / ancNe)
         
-        oldestEpoch, ancCensusSize = getOldestEpoch(demo)
-        ds = reversedCensusFun(curdemo, ancTime, ancCensusSize)
+        oldestEpoch, censusSize = getOldestEpoch(demo)
+        ds = reversedCensusFun(curdemo, ancTime, censusSize)
         fs_neu = moments.Demographics1D.snm([proj_size])
-        fs_neu.integrate(ds, ancTime / 2 / ancCensusSize)
+        fs_neu.integrate(ds, ancTime / 2 / censusSize)
         # fs_neu = moments.Demographics1D.snm([proj_size])
         # fs_neu.integrate(cs, ancTime / 2 / ancTime)
 
         # normalizing so singletons have freq 1, cause thats all I can think of right now
         fs = fs * 8 * 1e-8 * ancNe
         projData = projData * 1e-8
-        fs_neu = fs_neu * 8 * 1e-8 * ancCensusSize   
+        fs_neu = fs_neu * 8 * 1e-8 * censusSize   
         
         fig, ax = plt.subplots(1, 1, figsize=(8, 4))
         ax.plot(fs, ".-", ms=8, lw=1, label="BGS")
