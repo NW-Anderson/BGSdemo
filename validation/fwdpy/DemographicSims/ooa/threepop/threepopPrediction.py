@@ -60,8 +60,8 @@ def bFromDemes(positions, u, s, r, regionSize, focalPos, demesFile, tol):
     diffs = [testFun[i+1] - testFun[i] for i in range(len(testFun)-1)]
     ancTime = next((i for i,x in enumerate(diffs) if abs(x) < tol), None)
     ancTime = censusSize / 10 * ancTime 
-    if ancTime > oldestEpoch:
-        print("woah there partner")
+    # if ancTime > oldestEpoch:
+    #     print("woah there partner")
     ancTime = max(ancTime, oldestEpoch)
     ancB = B(positions, u, s, ancTime, r, regionSize, focalPos) 
     ancNe = ancB * censusSize 
@@ -111,25 +111,34 @@ def reversedCensusFun(demesFile, ancTime, ancNe):
     cs = censusFun(demesFile)
     return lambda t: [x  / cs(ancTime)[0] for x in cs(ancTime - t * 2 * ancNe) if x != None]
 
+
 g = demo
-sampled_demes=['CEU']
+sampled_demes=['OOA']
 sample_sizes=[40]
+scaling_fun = ff
 sample_times=None
 samples=None
 unsampled_n=4
 gamma=None
 s=None
 h=None
-theta=None
+theta=1
 u=None
 reversible=False
 L=1
 
-# new params
+import copy
+import warnings
 
+# new params
+bgs_Ne = ancNe
+anc_gen = ancTime
 
 def SFS_bgs(
     g,
+    scaling_fun,
+    bgs_Ne,
+    anc_gen,
     sampled_demes=None,
     sample_sizes=None,
     sample_times=None,
@@ -138,7 +147,7 @@ def SFS_bgs(
     gamma=None,
     s=None,
     h=None,
-    theta=None,
+    theta=1,
     u=None,
     reversible=False,
     L=1,
@@ -224,6 +233,15 @@ def SFS_bgs(
         to n[i], where i is the deme index.
     :rtype: :class:`moments.Spectrum`
     """
+    
+    # get reference Ne from demes model
+    # cs_Ne = _get_root_Ne(g)
+    oldest_epoch, cs_Ne  = getOldestEpoch(g)
+    if anc_gen > oldest_epoch:
+        g = add_new_ancestral_root(g, ancTime)
+    # demesdraw.tubes(g);
+    # demesdraw.tubes(test);
+    
     # could specify samples as a dict instead of sampled_demes and sample_sizes
     if samples is None:
         if sampled_demes is None or sample_sizes is None:
@@ -287,9 +305,6 @@ def SFS_bgs(
         sim_sample_sizes.append(max(n, unsampled_n))
         if t < g[d].end_time or t >= g[d].start_time:
             raise ValueError("sample time for {deme} must be within its time span")
-
-    # get reference Ne from demes model
-    Ne = _get_root_Ne(g)
 
     # if (unscaled) s is provided, convert into (scaled) gamma selection coefficients
     if s is not None:
@@ -393,22 +408,22 @@ def SFS_bgs(
                 f"Epoch {epoch} has demes {epoch_demes}."
             )
 
-    if ancNe is not None:
-        Ne = ancNe
+
     # get the list of size functions, migration matrices, and frozen attributes from
     # the deme graph and event times, matching the integration times
-    nu_funcs, mig_mats, Ts, frozen_pops = _get_integration_parameters(
-        g, demes_present, list_of_frozen_demes, Ne=Ne
+    # nu_funcs, mig_mats, Ts, frozen_pops = _get_integration_parameters(
+    #     g, demes_present, list_of_frozen_demes, Ne=cs_Ne
+    # )
+    
+    # nu_funcs_bgs, mig_mats_bgs, Ts_bgs, frozen_pops_bgs = _get_integration_parameters(
+    #     g, demes_present, list_of_frozen_demes, Ne=ancNe
+    # )
+    
+    # nu_funcs_test, mig_mats_test, Ts_test, frozen_pops_test 
+    nu_funcs, mig_mats, Ts, frozen_pops = _get_integration_parameters_bgs(
+        g, demes_present, list_of_frozen_demes, bgs_Ne, scaling_fun
     )
     
-    nu_funcs_bgs, mig_mats_bgs, Ts, frozen_pops_bgs = _get_integration_parameters(
-        g, demes_present, list_of_frozen_demes, Ne=ancNe
-    )
-    
-    rescale_nu_funcs_bgs(nu_funcs_bgs, ancNe)
-    rescale_nu(nu_funcs, f, )
-    
-
     # get the sample sizes within each deme, given sample sizes
     deme_sample_sizes = _get_deme_sample_sizes(
         g,
@@ -448,18 +463,178 @@ def SFS_bgs(
 
     return fs
 
-def rescale_nu_funcs_bgs(g, nu_funcs_bgs, ancNe):
-    cs = _get_root_Ne(g)
-    r = ancNe / cs
+# new_name = 'buf'
+# split_time = ancTime
+# size = censusSize
+
+def add_new_ancestral_root(graph,
+                          split_time,
+                          new_name='buf',
+                          size=None) -> demes.Graph:
+    """
+    Add a new ancestral deme above the current root(s).
+
+    Parameters
+    ----------
+    graph : demes.Graph
+        Existing demes graph.
+    new_name : str
+        Name for the new ancestral population.
+    split_time : float
+        Time (in generations before present) when the new ancestral ends and the
+        old root(s) begin. Must be > 0 and finite.
+    size : float | None
+        Constant size for the new ancestral. If None, use the first root's
+        initial size (its size at its earliest time) as a default.
+
+    Returns
+    -------
+    demes.Graph
+        New graph with the added ancestral root.
+    """
+    if not (math.isfinite(split_time) and split_time > 0):
+        raise ValueError("split_time must be finite and > 0.")
+    if any(d.name == new_name for d in graph.demes):
+        raise ValueError(f"Deme '{new_name}' already exists.")
+
+    # Convert to a mutable representation
+    d = copy.deepcopy(graph.asdict())
+
+    # Find root demes (no ancestors)
+    root_demes = [deme for deme in d["demes"] if len(deme.get("ancestors", [])) == 0]
+    if len(root_demes) == 0:
+        raise ValueError("No root demes found (unexpected).")
+
+    # Choose a default size if not provided
+    if size is None:
+        # Use the first root's earliest (ancestral) epoch start_size
+        # (In demes dict form, epochs[0]["start_size"] is typically the size at deme start_time.)
+        size = root_demes[0]["epochs"][0]["start_size"]
+
+    # Add the new ancestral deme
+    new_deme = {
+        "name": new_name,
+        "start_time": math.inf,
+        "epochs": [
+            {"end_time": float(split_time), "start_size": float(size)}
+        ],
+    }
+    # d["demes"].append(new_deme)
+    d["demes"].insert(0, new_deme)
+
+    # Re-root each old root under the new ancestral
+    for deme in root_demes:
+        # Ensure the old root starts at split_time (it cannot still start at inf if it has an ancestor).
+        deme["start_time"] = float(split_time)
+        deme["ancestors"] = [new_name]
+        deme["proportions"] = [1.0]
+
+    # Rebuild graph
+    return demes.Graph.fromdict(d)
+
+# bgs_Ne = ancNe
+# frozen_list = list_of_frozen_demes
+
+def _get_integration_parameters_bgs(g, demes_present, frozen_list, bgs_Ne, scaling_fun, cs_Ne=None):
+    """
+    Returns a list of size functions, migration matrices, integration times,
+    and lists frozen demes.
+    """
+    nu_funcs = []
+    integration_times = []
+    migration_matrices = []
+    frozen_demes = []
+
+    if cs_Ne is None:
+        cs_Ne = _get_root_Ne(g)
+    else:
+        if cs_Ne != _get_root_Ne(g):
+            warnings.warn(
+                "Input cs_Ne is different from root population initial size, "
+                "subsequent population size scaling may be incorrect"
+            )
     
-    tmp = []
-    for x in nu_funcs_bgs:
-        if type(x) is list:
-            tmp.append([r * y for y in x])
+    T_elapsed = 0
+    for interval, live_demes in sorted(demes_present.items())[::-1]:
+        # get intergration time for interval
+        T = (interval[0] - interval[1]) / 2 / bgs_Ne
+        if T == math.inf:
+            T = 0
+        integration_times.append(T)
+        # get frozen attributes
+        freeze = [d in frozen_list for d in live_demes]
+        frozen_demes.append(freeze)
+        # get nu_function or list of sizes (if all constant)
+        sizes = []
+        for d in live_demes:
+            sizes.append(_sizes_at_time(g, d, interval))
+        # nu_func = _make_nu_func(sizes, T, cs_Ne)
+        nu_func = _make_nu_func_bgs(sizes, T, cs_Ne, T_elapsed, scaling_fun)
+        T_elapsed += T
+
+        nu_funcs.append(nu_func)
+        # get migration matrix for interval
+        mig_mat = np.zeros((len(live_demes), len(live_demes)))
+        for ii, d_from in enumerate(live_demes):
+            for jj, d_to in enumerate(live_demes):
+                if d_from != d_to:
+                    m = _migration_rate_in_interval(g, d_from, d_to, interval)
+                    mig_mat[jj, ii] = 2 * bgs_Ne * m
+        migration_matrices.append(mig_mat)
+
+    return nu_funcs, migration_matrices, integration_times, frozen_demes
+
+def _make_nu_func_bgs(sizes, T, Ne, T_elapsed, scaling_fun):
+    """
+    Given the sizes at start and end of time interval, and the size function for
+    each deme, along with the integration time and reference Ne, return the
+    size function that gets passed to the moments integration routines.
+    """
+    if np.all([s[-1] == "constant" for s in sizes]):
+        # all constant
+        if T == 0:
+            nu_func = [s[0] / Ne for s in sizes]
         else:
-            tmp.append([lambda t: r * y(t) for y in x])
+            nu_funcs_separated = []
+            for s in sizes:
+                assert s[0] == s[1]
+                nu_funcs_separated.append(lambda t, N0=s[0]: (N0 / Ne) * scaling_fun(T_elapsed + t)[0])
+                
+            def nu_func(t):
+                return [nu(t) for nu in nu_funcs_separated]
+    else:
+        nu_funcs_separated = []
+        for s in sizes:
+            if s[-1] == "constant":
+                assert s[0] == s[1]
+                nu_funcs_separated.append(lambda t, N0=s[0]: (N0 / Ne) * scaling_fun(T_elapsed + t)[0])
+            elif s[-1] == "linear":
+                nu_funcs_separated.append(
+                    lambda t, N0=s[0], NF=s[1]: (N0 / Ne + t / T * (NF - N0) / Ne) * scaling_fun(T_elapsed + t)[0] 
+                )
+            elif s[-1] == "exponential":
+                nu_funcs_separated.append(
+                    lambda t, N0=s[0], NF=s[1]: (N0
+                    / Ne
+                    * np.exp(np.log(NF / N0) * t / T)) * scaling_fun(T_elapsed + t)[0]
+                )
+            else:
+                raise ValueError(f"{s[-1]} not a valid size function")
 
+        def nu_func(t):
+            return [nu(t) for nu in nu_funcs_separated]
 
+        # check that this is correct, or if we have to "pin" parameters
+    return nu_func
+
+fig, ax = plt.subplots(1, 1, figsize=(8, 4))
+ax.plot(np.arange(0,Ts_test[1], 0.001),[nu_funcs_test[1](t) for t in np.arange(0,Ts_test[1], 0.001)], "-", ms=8, lw=1, label="nu_func1")
+ax.plot(np.arange(0,Ts_test[2], 0.001),[nu_funcs_test[2](t) for t in np.arange(0,Ts_test[2], 0.001)], "-", ms=8, lw=1, label="nu_func2")
+# ax.plot(np.arange(0,T, 0.001),[f(t) for t in np.arange(0,T, 0.001)], "-", ms=8, lw=1, label="f")
+ax.set_xlabel("Time in past")
+ax.set_ylabel("value")
+ax.set_title("s = " + str(curs) + ", demo = " + curdemo)
+ax.legend();
 
 # todo find out what happens when I redefine these function names???
 s = curs
@@ -496,50 +671,42 @@ for i in range(3):
         demo = demes.load(curdemo)
         if demo.time_units != "generations":
             demo = demo.in_generations()
-        demesdraw.tubes(demo);
+        # demesdraw.tubes(demo);
         
-        oldestEpoch, censusSize = getOldestEpoch(demo)
 
-        f, ancTime, ancNe = bFromDemes(pointMassPosition, u, curs, r, regionSize, focalPos, curdemo, tol)
-        
-        sampled_pops = 
-        sample_sizes = [sample_size]
-        
-        SFS_bgs(
+        ff, ancTime, ancNe = bFromDemes(pointMassPosition, u, curs, r, regionSize, focalPos, curdemo, tol)
+       
+        fs = SFS_bgs(
            demo,
            sampled_demes=["CEU"],
-           sample_sizes=[sample_size]
+           sample_sizes=[sample_size],
+           theta = 1,
+           bgs_Ne = ancNe,
+           scaling_fun=ff
        )
        
-        # old from here down
+        oldestEpoch, censusSize = getOldestEpoch(demo)
+        ff = lambda t: [1]
+        fs_neu = SFS_bgs(
+            demo,
+            sampled_demes=["CEU"],
+            sample_sizes=[sample_size],
+            theta=1,
+            bgs_Ne = censusSize,
+            scaling_fun=ff
+        )
         
-        cs = reversedCensusFun(curdemo, ancTime, ancNe)
-        
-        g = lambda t: [x * y for x,y in zip(f(t), cs(t))]
-        
-        fs = moments.Demographics1D.snm([sample_size])
-        fs.integrate(g, ancTime / 2 / ancNe)
-        
-        oldestEpoch, ancCensusSize = getOldestEpoch(demo)
-        ds = reversedCensusFun(curdemo, ancTime, ancCensusSize)
-        fs_neu = moments.Demographics1D.snm([proj_size])
-        fs_neu.integrate(ds, ancTime / 2 / ancCensusSize)
-        # fs_neu = moments.Demographics1D.snm([proj_size])
-        # fs_neu.integrate(cs, ancTime / 2 / ancTime)
-        # fs_neu = moments.Demographics1D.snm([proj_size])
-        # fs_neu.integrate(cs, ancTime / 2 / ancNe)
-        
-        sampled_demes = ["CEU"]
-
         ds = moments.Spectrum.from_demes(
-            curdemo, sampled_demes=sampled_demes, sample_sizes=[proj_size]
+            curdemo, 
+            sampled_demes=["CEU"], 
+            sample_sizes=[sample_size]
         )
 
         # normalizing so singletons have freq 1, cause thats all I can think of right now
         fs = fs * 8 * 1e-8 * ancNe
         projData = projData * 1e-8
-        fs_neu = fs_neu * 8 * 1e-8 * ancCensusSize   
-        ds = ds * 8 * 1e-8 * ancCensusSize
+        fs_neu = fs_neu * 8 * 1e-8 * censusSize   
+        ds = ds * 8 * 1e-8 * censusSize
         
         ax[i].plot(fs, ".-", ms=8, lw=1, label="BGS")
         ax[i].plot(projData, "x-", ms=8, lw=1, label="fwdpy")
@@ -550,6 +717,110 @@ for i in range(3):
         if np.logical_and(i == 2, j == 0):
             ax[i].legend();
             
+
+def parseJointData():
+    os.chdir("/home/nathan/Documents/GitHub/BGSdemo/validation/fwdpy/DemographicSims/ooa/threepop")
+    
+    file_path = "ooa.txt"
+    data_list = []
+    
+    with open(file_path, 'r') as file:
+        for line in file:
+            # Split each line by whitespace and append the list of elements
+            # You may want to convert elements to their correct types (e.g., int, float)
+            elements = line.strip().split() 
+            if elements: # Avoid processing empty lines
+                data_list.append(elements)
+                
+    os.chdir("/media/nathan/T7/BGSdemo/threepopooadata/jointData")
+    
+    pdata = np.zeros((3,101,101,101))
+    numSum = np.zeros(3)
+    for s, d, seed in data_list:
+        simData = np.load(seed +'.npy')
+        
+        if s == '0.001':
+            i = 0
+        if s == '0.005':
+            i = 1
+        if s == '0.01':
+            i = 2
+            
+        pdata[i] = np.add(pdata[i], simData)
+        numSum[i] += 1
+    
+    parsedData = [p / n for p,n in zip(pdata, numSum)]
+    return parsedData
+
+jdata = parseJointData()
+fig, ax = plt.subplots(3, 1, figsize=(16, 8), sharex=True, sharey=False)
+fig.text(0.5, 0.04, 'Allele Frequency', ha='center')
+fig.text(0.04, 0.5, 'Count', va='center', rotation='vertical')
+fig.subplots_adjust(hspace = .25)
+
+for i in range(3):
+    for j in range(1):
+        curs = [1e-3, 5e-3, 1e-2][i]
+        curdemo = ["ooa.yaml"][j]
+        
+        os.chdir("/media/nathan/T7/BGSdemo/threepopooadata/jointData")
+
+        # simData = pd.read_csv(str(curs) + "_" + str(curdemo) + ".csv", header = None)
+        # simData = simData[0].to_numpy()
+        # simData = moments.Spectrum(simData,data_folded=False) 
+        # projData = simData.project([proj_size])
+        
+        simData = jdata[i]
+        simData = moments.Spectrum(simData, data_folded = False)
+        projData = simData.project([proj_size, proj_size])
+        
+        os.chdir("/home/nathan/Documents/GitHub/BGSdemo/validation/fwdpy/DemographicSims/ooa/twopop")
+
+        # test
+        demo = demes.load(curdemo)
+        if demo.time_units != "generations":
+            demo = demo.in_generations()
+        # demesdraw.tubes(demo);
+        
+        oldestEpoch, censusSize = getOldestEpoch(demo)
+
+        f, ancTime, ancNe = bFromDemes(pointMassPosition, u, curs, r, regionSize, focalPos, curdemo, tol)
+        
+        fs = SFS_bgs(
+           demo,
+           sampled_demes=["OOA","YRI"],
+           sample_sizes=[sample_size, sample_size],
+           theta = 1,
+           bgs_Ne = ancNe,
+           scaling_fun=ff
+       )
+       
+        # f = lambda t: [1]
+        # fs_neu = SFS_bgs(
+        #     demo,
+        #     sampled_demes=["OOA"],
+        #     sample_sizes=[sample_size],
+        #     theta=1,
+        #     bgs_Ne = censusSize
+        # )
+        
+        # ds = moments.Spectrum.from_demes(
+        #     curdemo, 
+        #     sampled_demes=["OOA"], 
+        #     sample_sizes=[sample_size]
+        # )
+
+        # normalizing so singletons have freq 1, cause thats all I can think of right now
+        fs = fs * 8 * 1e-8 * ancNe
+        projData = projData * 1e-8
+        # fs_neu = fs_neu * 8 * 1e-8 * censusSize   
+        # ds = ds * 8 * 1e-8 * censusSize
+        
+        # moments.Plotting.plot_single_2d_sfs(fs)
+        # moments.Plotting.plot_single_2d_sfs(projData)plot_3d_spectrum_mayavi
+        
+        moments.Plotting.plot_2d_comp_Poisson(fs, projData)
+
 
 # moments.Plotting.plot_1d_comp_Poisson(fs*8e-4, projData*2e-8)
 

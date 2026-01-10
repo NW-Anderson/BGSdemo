@@ -1,0 +1,321 @@
+(* Content-type: application/vnd.wolfram.mathematica *)
+
+(*** Wolfram Notebook File ***)
+(* http://www.wolfram.com/nb *)
+
+(* CreatedBy='Mathematica 13.3' *)
+
+(*CacheID: 234*)
+(* Internal cache information:
+NotebookFileLineBreakTest
+NotebookFileLineBreakTest
+NotebookDataPosition[       158,          7]
+NotebookDataLength[     12931,        311]
+NotebookOptionsPosition[     10868,        274]
+NotebookOutlinePosition[     11267,        290]
+CellTagsIndexPosition[     11224,        287]
+WindowFrame->Normal*)
+
+(* Beginning of Notebook Content *)
+Notebook[{
+
+Cell[CellGroupData[{
+Cell[BoxData[
+ RowBox[{"Expectation", "[", 
+  RowBox[{
+   RowBox[{
+    FractionBox["u", "s"], 
+    SuperscriptBox["\[ExponentialE]", 
+     RowBox[{
+      RowBox[{"-", "s"}], " ", "t"}]]}], ",", 
+   RowBox[{"s", "\[Distributed]", 
+    RowBox[{"GammaDistribution", "[", 
+     RowBox[{"\[Alpha]", ",", "\[Beta]"}], "]"}]}]}], "]"}]], "Input",
+ CellChangeTimes->{{3.9770047956400557`*^9, 3.9770048585933228`*^9}, {
+  3.9770048896875134`*^9, 3.977004890510025*^9}},
+ CellLabel->"In[5]:=",ExpressionUUID->"515b5e96-ef4a-4c7a-9c64-a8a250ca62df"],
+
+Cell[BoxData[
+ FractionBox[
+  RowBox[{"u", " ", 
+   SuperscriptBox[
+    RowBox[{"(", 
+     RowBox[{"1", "+", 
+      RowBox[{"t", " ", "\[Beta]"}]}], ")"}], 
+    RowBox[{"1", "-", "\[Alpha]"}]]}], 
+  RowBox[{
+   RowBox[{"(", 
+    RowBox[{
+     RowBox[{"-", "1"}], "+", "\[Alpha]"}], ")"}], " ", 
+   "\[Beta]"}]]], "Output",
+ CellChangeTimes->{{3.977004834529901*^9, 3.977004858968953*^9}, 
+   3.97700489329867*^9},
+ CellLabel->"Out[5]=",ExpressionUUID->"49846e3b-dd56-42b9-b5a1-6cc44a570224"]
+}, Open  ]],
+
+Cell[CellGroupData[{
+
+Cell[BoxData[
+ RowBox[{"Expectation", "[", 
+  RowBox[{
+   FractionBox["u", "s"], ",", 
+   RowBox[{"s", "\[Distributed]", 
+    RowBox[{"GammaDistribution", "[", 
+     RowBox[{"\[Alpha]", ",", "\[Beta]"}], "]"}]}]}], "]"}]], "Input",
+ CellChangeTimes->{{3.9770047956400557`*^9, 3.977004898420266*^9}},
+ CellLabel->"In[6]:=",ExpressionUUID->"d1b448d9-d8b7-4542-abca-7dea8acb0177"],
+
+Cell[BoxData[
+ FractionBox["u", 
+  RowBox[{
+   RowBox[{"(", 
+    RowBox[{
+     RowBox[{"-", "1"}], "+", "\[Alpha]"}], ")"}], " ", 
+   "\[Beta]"}]]], "Output",
+ CellChangeTimes->{{3.977004874505411*^9, 3.9770048988057423`*^9}},
+ CellLabel->"Out[6]=",ExpressionUUID->"cb0ad350-4ce4-45bf-9f8f-2bf25c329bef"]
+}, Open  ]],
+
+Cell[CellGroupData[{
+
+Cell[BoxData[
+ RowBox[{"Manipulate", "[", 
+  RowBox[{
+   RowBox[{"Plot", "[", 
+    RowBox[{
+     RowBox[{"PDF", "[", 
+      RowBox[{
+       RowBox[{"GammaDistribution", "[", 
+        RowBox[{"\[Alpha]", ",", "\[Beta]"}], "]"}], ",", "x"}], "]"}], ",", 
+     RowBox[{"{", 
+      RowBox[{"x", ",", "0", ",", "1"}], "}"}]}], "]"}], ",", 
+   RowBox[{"{", 
+    RowBox[{"\[Alpha]", ",", "0", ",", "10"}], "}"}], ",", 
+   RowBox[{"{", 
+    RowBox[{"\[Beta]", ",", "0", ",", "10"}], "}"}]}], "]"}]], "Input",
+ CellChangeTimes->{{3.977004940992672*^9, 3.977005006426072*^9}},
+ CellLabel->"In[8]:=",ExpressionUUID->"3851c9e8-500c-4d63-af02-0c63031dc820"],
+
+Cell[BoxData[
+ TagBox[
+  StyleBox[
+   DynamicModuleBox[{$CellContext`\[Alpha]$$ = 1, $CellContext`\[Beta]$$ = 
+    0.005, Typeset`show$$ = True, Typeset`bookmarkList$$ = {}, 
+    Typeset`bookmarkMode$$ = "Menu", Typeset`animator$$, Typeset`animvar$$ = 
+    1, Typeset`name$$ = "\"untitled\"", Typeset`specs$$ = {{
+      Hold[$CellContext`\[Alpha]$$], 0, 10}, {
+      Hold[$CellContext`\[Beta]$$], 0, 10}}, Typeset`size$$ = {
+    360., {99., 102.713407459459}}, Typeset`update$$ = 0, Typeset`initDone$$, 
+    Typeset`skipInitDone$$ = True}, 
+    DynamicBox[Manipulate`ManipulateBoxes[
+     1, StandardForm, 
+      "Variables" :> {$CellContext`\[Alpha]$$ = 0, $CellContext`\[Beta]$$ = 
+        0}, "ControllerVariables" :> {}, 
+      "OtherVariables" :> {
+       Typeset`show$$, Typeset`bookmarkList$$, Typeset`bookmarkMode$$, 
+        Typeset`animator$$, Typeset`animvar$$, Typeset`name$$, 
+        Typeset`specs$$, Typeset`size$$, Typeset`update$$, Typeset`initDone$$,
+         Typeset`skipInitDone$$}, "Body" :> Plot[
+        PDF[
+         GammaDistribution[$CellContext`\[Alpha]$$, $CellContext`\[Beta]$$], \
+$CellContext`x], {$CellContext`x, 0, 1}], 
+      "Specifications" :> {{$CellContext`\[Alpha]$$, 0, 
+         10}, {$CellContext`\[Beta]$$, 0, 10}}, "Options" :> {}, 
+      "DefaultOptions" :> {}],
+     ImageSizeCache->{406., {176.6875, 182.3125}},
+     SingleEvaluation->True],
+    Deinitialization:>None,
+    DynamicModuleValues:>{},
+    SynchronousInitialization->True,
+    UndoTrackedVariables:>{Typeset`show$$, Typeset`bookmarkMode$$},
+    UnsavedVariables:>{Typeset`initDone$$},
+    UntrackedVariables:>{Typeset`size$$}], "Manipulate",
+   Deployed->True,
+   StripOnInput->False],
+  Manipulate`InterpretManipulate[1]]], "Output",
+ CellChangeTimes->{{3.977004993245654*^9, 3.977005006826393*^9}, 
+   3.977005052608603*^9},
+ CellLabel->"Out[8]=",ExpressionUUID->"bd5c1c3b-b726-45ff-80cc-42f00a75d6f2"],
+
+Cell[BoxData[
+ TemplateBox[{
+  "GammaDistribution", "posprm", 
+   "\"Parameter \\!\\(\\*RowBox[{\\\"0\\\"}]\\) at position \\!\\(\\*RowBox[{\
+\\\"1\\\"}]\\) in \\!\\(\\*RowBox[{\\\"GammaDistribution\\\", \\\"[\\\", \
+RowBox[{\\\"0\\\", \\\",\\\", \\\"0\\\"}], \\\"]\\\"}]\\) is expected to be \
+positive.\"", 2, 9, 17, 30043929880922862341, "Local"},
+  "MessageTemplate"]], "Message", "MSG",
+ CellChangeTimes->{3.977005006922098*^9},
+ CellLabel->"",ExpressionUUID->"29474c39-5a35-4a9f-9272-07476bc67466"],
+
+Cell[BoxData[
+ TemplateBox[{
+  "GammaDistribution", "posprm", 
+   "\"Parameter \\!\\(\\*RowBox[{\\\"0.`\\\"}]\\) at position \
+\\!\\(\\*RowBox[{\\\"1\\\"}]\\) in \
+\\!\\(\\*RowBox[{\\\"GammaDistribution\\\", \\\"[\\\", RowBox[{\\\"0.`\\\", \
+\\\",\\\", \\\"0.`\\\"}], \\\"]\\\"}]\\) is expected to be positive.\"", 2, 9,
+    18, 30043929880922862341, "Local"},
+  "MessageTemplate"]], "Message", "MSG",
+ CellChangeTimes->{3.977005006927939*^9},
+ CellLabel->"",ExpressionUUID->"89d8e8ee-bffa-44bd-9608-ba24d12a1cd8"],
+
+Cell[BoxData[
+ TemplateBox[{
+  "GammaDistribution", "posprm", 
+   "\"Parameter \\!\\(\\*RowBox[{\\\"0\\\"}]\\) at position \\!\\(\\*RowBox[{\
+\\\"1\\\"}]\\) in \\!\\(\\*RowBox[{\\\"GammaDistribution\\\", \\\"[\\\", \
+RowBox[{\\\"0\\\", \\\",\\\", \\\"0\\\"}], \\\"]\\\"}]\\) is expected to be \
+positive.\"", 2, 9, 19, 30043929880922862341, "Local"},
+  "MessageTemplate"]], "Message", "MSG",
+ CellChangeTimes->{3.977005006932172*^9},
+ CellLabel->"",ExpressionUUID->"8404f821-b6b0-429c-89d2-b7d73fac7fe3"],
+
+Cell[BoxData[
+ TemplateBox[{
+  "General", "stop", 
+   "\"Further output of \\!\\(\\*StyleBox[RowBox[{\\\"GammaDistribution\\\", \
+\\\"::\\\", \\\"posprm\\\"}], \\\"MessageName\\\"]\\) will be suppressed \
+during this calculation.\"", 2, 9, 20, 30043929880922862341, "Local"},
+  "MessageTemplate"]], "Message", "MSG",
+ CellChangeTimes->{3.977005006936244*^9},
+ CellLabel->"",ExpressionUUID->"f4a7f671-e7db-40e1-913d-d89cf9de226f"],
+
+Cell[BoxData[
+ TemplateBox[{
+  "GammaDistribution", "posprm", 
+   "\"Parameter \\!\\(\\*RowBox[{\\\"0.`\\\"}]\\) at position \
+\\!\\(\\*RowBox[{\\\"1\\\"}]\\) in \
+\\!\\(\\*RowBox[{\\\"GammaDistribution\\\", \\\"[\\\", RowBox[{\\\"0.`\\\", \
+\\\",\\\", \\\"0\\\"}], \\\"]\\\"}]\\) is expected to be positive.\"", 2, 9, 
+   25, 30043929880922862341, "Local"},
+  "MessageTemplate"]], "Message", "MSG",
+ CellChangeTimes->{3.9770050092148647`*^9},
+ CellLabel->"",ExpressionUUID->"8ade5d6c-bd68-413a-8945-2648d0f4890a"],
+
+Cell[BoxData[
+ TemplateBox[{
+  "GammaDistribution", "posprm", 
+   "\"Parameter \\!\\(\\*RowBox[{\\\"0.`\\\"}]\\) at position \
+\\!\\(\\*RowBox[{\\\"1\\\"}]\\) in \
+\\!\\(\\*RowBox[{\\\"GammaDistribution\\\", \\\"[\\\", RowBox[{\\\"0.`\\\", \
+\\\",\\\", \\\"0.`\\\"}], \\\"]\\\"}]\\) is expected to be positive.\"", 2, 9,
+    26, 30043929880922862341, "Local"},
+  "MessageTemplate"]], "Message", "MSG",
+ CellChangeTimes->{3.9770050092183037`*^9},
+ CellLabel->"",ExpressionUUID->"593121f9-e778-45ab-8b17-0ee93054dd04"],
+
+Cell[BoxData[
+ TemplateBox[{
+  "GammaDistribution", "posprm", 
+   "\"Parameter \\!\\(\\*RowBox[{\\\"0.`\\\"}]\\) at position \
+\\!\\(\\*RowBox[{\\\"1\\\"}]\\) in \
+\\!\\(\\*RowBox[{\\\"GammaDistribution\\\", \\\"[\\\", RowBox[{\\\"0.`\\\", \
+\\\",\\\", \\\"0\\\"}], \\\"]\\\"}]\\) is expected to be positive.\"", 2, 9, 
+   27, 30043929880922862341, "Local"},
+  "MessageTemplate"]], "Message", "MSG",
+ CellChangeTimes->{3.977005009222777*^9},
+ CellLabel->"",ExpressionUUID->"855716a4-384c-4cfc-9279-dfa904a9a984"],
+
+Cell[BoxData[
+ TemplateBox[{
+  "General", "stop", 
+   "\"Further output of \\!\\(\\*StyleBox[RowBox[{\\\"GammaDistribution\\\", \
+\\\"::\\\", \\\"posprm\\\"}], \\\"MessageName\\\"]\\) will be suppressed \
+during this calculation.\"", 2, 9, 28, 30043929880922862341, "Local"},
+  "MessageTemplate"]], "Message", "MSG",
+ CellChangeTimes->{3.9770050092258368`*^9},
+ CellLabel->"",ExpressionUUID->"6bdc2889-50fb-40a5-9c1c-e1d40240e28b"],
+
+Cell[BoxData[
+ TemplateBox[{
+  "GammaDistribution", "posprm", 
+   "\"Parameter \\!\\(\\*RowBox[{\\\"0\\\"}]\\) at position \\!\\(\\*RowBox[{\
+\\\"2\\\"}]\\) in \\!\\(\\*RowBox[{\\\"GammaDistribution\\\", \\\"[\\\", \
+RowBox[{\\\"0.68`\\\", \\\",\\\", \\\"0\\\"}], \\\"]\\\"}]\\) is expected to \
+be positive.\"", 2, 9, 77, 30043929880922862341, "Local"},
+  "MessageTemplate"]], "Message", "MSG",
+ CellChangeTimes->{3.977005012579401*^9},
+ CellLabel->"",ExpressionUUID->"bfde40f3-261a-44f2-9e5a-94e868feb0e7"],
+
+Cell[BoxData[
+ TemplateBox[{
+  "GammaDistribution", "posprm", 
+   "\"Parameter \\!\\(\\*RowBox[{\\\"0.`\\\"}]\\) at position \
+\\!\\(\\*RowBox[{\\\"2\\\"}]\\) in \
+\\!\\(\\*RowBox[{\\\"GammaDistribution\\\", \\\"[\\\", RowBox[{\\\"0.68`\\\", \
+\\\",\\\", \\\"0.`\\\"}], \\\"]\\\"}]\\) is expected to be positive.\"", 2, 9,
+    78, 30043929880922862341, "Local"},
+  "MessageTemplate"]], "Message", "MSG",
+ CellChangeTimes->{3.977005012587365*^9},
+ CellLabel->"",ExpressionUUID->"b57c0f0e-814e-4566-bdf2-4caafcb74870"],
+
+Cell[BoxData[
+ TemplateBox[{
+  "GammaDistribution", "posprm", 
+   "\"Parameter \\!\\(\\*RowBox[{\\\"0\\\"}]\\) at position \\!\\(\\*RowBox[{\
+\\\"2\\\"}]\\) in \\!\\(\\*RowBox[{\\\"GammaDistribution\\\", \\\"[\\\", \
+RowBox[{\\\"0.68`\\\", \\\",\\\", \\\"0\\\"}], \\\"]\\\"}]\\) is expected to \
+be positive.\"", 2, 9, 79, 30043929880922862341, "Local"},
+  "MessageTemplate"]], "Message", "MSG",
+ CellChangeTimes->{3.977005012590633*^9},
+ CellLabel->"",ExpressionUUID->"94b100f8-9309-4e7d-b9ba-7815dc990789"],
+
+Cell[BoxData[
+ TemplateBox[{
+  "General", "stop", 
+   "\"Further output of \\!\\(\\*StyleBox[RowBox[{\\\"GammaDistribution\\\", \
+\\\"::\\\", \\\"posprm\\\"}], \\\"MessageName\\\"]\\) will be suppressed \
+during this calculation.\"", 2, 9, 80, 30043929880922862341, "Local"},
+  "MessageTemplate"]], "Message", "MSG",
+ CellChangeTimes->{3.977005012593176*^9},
+ CellLabel->"",ExpressionUUID->"72ab80fe-90eb-4d29-9d45-e8be861e92b9"]
+}, Open  ]]
+},
+WindowSize->{606, 665.25},
+WindowMargins->{{Automatic, 200.25}, {32.25, Automatic}},
+FrontEndVersion->"13.3 for Linux x86 (64-bit) (June 3, 2023)",
+StyleDefinitions->"Default.nb",
+ExpressionUUID->"9ca18db4-7034-49de-abe4-0f840a1cae30"
+]
+(* End of Notebook Content *)
+
+(* Internal cache information *)
+(*CellTagsOutline
+CellTagsIndex->{}
+*)
+(*CellTagsIndex
+CellTagsIndex->{}
+*)
+(*NotebookFileOutline
+Notebook[{
+Cell[CellGroupData[{
+Cell[580, 22, 538, 13, 42, "Input",ExpressionUUID->"515b5e96-ef4a-4c7a-9c64-a8a250ca62df"],
+Cell[1121, 37, 491, 15, 59, "Output",ExpressionUUID->"49846e3b-dd56-42b9-b5a1-6cc44a570224"]
+}, Open  ]],
+Cell[CellGroupData[{
+Cell[1649, 57, 377, 8, 42, "Input",ExpressionUUID->"d1b448d9-d8b7-4542-abca-7dea8acb0177"],
+Cell[2029, 67, 304, 8, 51, "Output",ExpressionUUID->"cb0ad350-4ce4-45bf-9f8f-2bf25c329bef"]
+}, Open  ]],
+Cell[CellGroupData[{
+Cell[2370, 80, 644, 16, 50, "Input",ExpressionUUID->"3851c9e8-500c-4d63-af02-0c63031dc820"],
+Cell[3017, 98, 1914, 39, 378, "Output",ExpressionUUID->"bd5c1c3b-b726-45ff-80cc-42f00a75d6f2"],
+Cell[4934, 139, 504, 9, 44, "Message",ExpressionUUID->"29474c39-5a35-4a9f-9272-07476bc67466"],
+Cell[5441, 150, 514, 10, 44, "Message",ExpressionUUID->"89d8e8ee-bffa-44bd-9608-ba24d12a1cd8"],
+Cell[5958, 162, 504, 9, 44, "Message",ExpressionUUID->"8404f821-b6b0-429c-89d2-b7d73fac7fe3"],
+Cell[6465, 173, 429, 8, 46, "Message",ExpressionUUID->"f4a7f671-e7db-40e1-913d-d89cf9de226f"],
+Cell[6897, 183, 514, 10, 44, "Message",ExpressionUUID->"8ade5d6c-bd68-413a-8945-2648d0f4890a"],
+Cell[7414, 195, 516, 10, 44, "Message",ExpressionUUID->"593121f9-e778-45ab-8b17-0ee93054dd04"],
+Cell[7933, 207, 512, 10, 44, "Message",ExpressionUUID->"855716a4-384c-4cfc-9279-dfa904a9a984"],
+Cell[8448, 219, 431, 8, 46, "Message",ExpressionUUID->"6bdc2889-50fb-40a5-9c1c-e1d40240e28b"],
+Cell[8882, 229, 508, 9, 44, "Message",ExpressionUUID->"bfde40f3-261a-44f2-9e5a-94e868feb0e7"],
+Cell[9393, 240, 516, 10, 44, "Message",ExpressionUUID->"b57c0f0e-814e-4566-bdf2-4caafcb74870"],
+Cell[9912, 252, 508, 9, 44, "Message",ExpressionUUID->"94b100f8-9309-4e7d-b9ba-7815dc990789"],
+Cell[10423, 263, 429, 8, 46, "Message",ExpressionUUID->"72ab80fe-90eb-4d29-9d45-e8be861e92b9"]
+}, Open  ]]
+}
+]
+*)
+
+(* End of internal cache information *)
+

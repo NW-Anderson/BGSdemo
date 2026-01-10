@@ -654,6 +654,108 @@ ax.set_ylabel("Density")
 ax.set_title("s = " + str(curs) + ", demo = " + curdemo)
 ax.legend();
 
+def parseJointData():
+    os.chdir("/home/nathan/Documents/GitHub/BGSdemo/validation/fwdpy/DemographicSims/ooa/twopop")
+    
+    file_path = "ooaTwoPop.txt"
+    data_list = []
+    
+    with open(file_path, 'r') as file:
+        for line in file:
+            # Split each line by whitespace and append the list of elements
+            # You may want to convert elements to their correct types (e.g., int, float)
+            elements = line.strip().split() 
+            if elements: # Avoid processing empty lines
+                data_list.append(elements)
+                
+    os.chdir("/media/nathan/T7/BGSdemo/ooaTwoPopData/joint")
+    
+    pdata = np.zeros((3,101,101))
+    numSum = np.zeros(3)
+    for s, d, seed in data_list:
+        simData = np.load(seed +'.npy')
+        
+        if s == '0.001':
+            i = 0
+        if s == '0.005':
+            i = 1
+        if s == '0.01':
+            i = 2
+            
+        pdata[i] = np.add(pdata[i], simData)
+        numSum[i] += 1
+    
+    parsedData = [p / n for p,n in zip(pdata, numSum)]
+    return parsedData
+
+jdata = parseJointData()
+fig, ax = plt.subplots(3, 1, figsize=(16, 8), sharex=True, sharey=False)
+fig.text(0.5, 0.04, 'Allele Frequency', ha='center')
+fig.text(0.04, 0.5, 'Count', va='center', rotation='vertical')
+fig.subplots_adjust(hspace = .25)
+
+for i in range(3):
+    for j in range(1):
+        curs = [1e-3, 5e-3, 1e-2][i]
+        curdemo = ["ooaTwoPop.yaml"][j]
+        
+        os.chdir("/media/nathan/T7/BGSdemo/ooaTwoPopData/joint")
+
+        # simData = pd.read_csv(str(curs) + "_" + str(curdemo) + ".csv", header = None)
+        # simData = simData[0].to_numpy()
+        # simData = moments.Spectrum(simData,data_folded=False) 
+        # projData = simData.project([proj_size])
+        
+        simData = jdata[i]
+        simData = moments.Spectrum(simData, data_folded = False)
+        projData = simData.project([proj_size, proj_size])
+        
+        os.chdir("/home/nathan/Documents/GitHub/BGSdemo/validation/fwdpy/DemographicSims/ooa/twopop")
+
+        # test
+        demo = demes.load(curdemo)
+        if demo.time_units != "generations":
+            demo = demo.in_generations()
+        # demesdraw.tubes(demo);
+        
+        oldestEpoch, censusSize = getOldestEpoch(demo)
+
+        f, ancTime, ancNe = bFromDemes(pointMassPosition, u, curs, r, regionSize, focalPos, curdemo, tol)
+        
+        fs = SFS_bgs(
+           demo,
+           sampled_demes=["OOA","YRI"],
+           sample_sizes=[sample_size, sample_size],
+           theta = 1,
+           bgs_Ne = ancNe
+       )
+       
+        # f = lambda t: [1]
+        # fs_neu = SFS_bgs(
+        #     demo,
+        #     sampled_demes=["OOA"],
+        #     sample_sizes=[sample_size],
+        #     theta=1,
+        #     bgs_Ne = censusSize
+        # )
+        
+        # ds = moments.Spectrum.from_demes(
+        #     curdemo, 
+        #     sampled_demes=["OOA"], 
+        #     sample_sizes=[sample_size]
+        # )
+
+        # normalizing so singletons have freq 1, cause thats all I can think of right now
+        fs = fs * 8 * 1e-8 * ancNe
+        projData = projData * 1e-8
+        # fs_neu = fs_neu * 8 * 1e-8 * censusSize   
+        # ds = ds * 8 * 1e-8 * censusSize
+        
+        # moments.Plotting.plot_single_2d_sfs(fs)
+        # moments.Plotting.plot_single_2d_sfs(projData)plot_3d_spectrum_mayavi
+        
+        moments.Plotting.plot_2d_comp_Poisson(fs, projData)
+
 # moments.Plotting.plot_1d_comp_Poisson(fs*8e-4, projData*2e-8)
 
 for curs in [1e-3, 5e-3, 1e-2]:
