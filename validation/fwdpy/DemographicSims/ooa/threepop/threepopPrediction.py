@@ -56,10 +56,23 @@ def bFromDemes(positions, u, s, r, regionSize, focalPos, demesFile, tol):
         graph = graph.in_generations()
     scaledu = u * regionSize
     oldestEpoch, censusSize = getOldestEpoch(graph)
-    testFun = [B(positions, u, s, t, r, regionSize, focalPos) for t in range(0,int(10 * censusSize),int(censusSize/10))]
-    diffs = [testFun[i+1] - testFun[i] for i in range(len(testFun)-1)]
-    ancTime = next((i for i,x in enumerate(diffs) if abs(x) < tol), None)
-    ancTime = censusSize / 10 * ancTime 
+    
+    diff = 100
+    start = 1
+    i = 0
+    while abs(diff) > tol:
+        end = B(positions, u, s, (i + 1) * censusSize / 10, r, regionSize, focalPos)
+        diff = end - start
+        start = end
+        i += 1
+    
+    i - 1
+    
+    # testFun = [B(positions, u, s, t, r, regionSize, focalPos) for t in range(0,int(10 * censusSize),int(censusSize/10))]
+    # diffs = [testFun[i+1] - testFun[i] for i in range(len(testFun)-1)]
+    # ancTime = next((i for i,x in enumerate(diffs) if abs(x) < tol), None)
+    
+    ancTime = censusSize / 10 * i 
     # if ancTime > oldestEpoch:
     #     print("woah there partner")
     ancTime = max(ancTime, oldestEpoch)
@@ -641,7 +654,7 @@ s = curs
 curN = censusSize
 # positions = pointMassPosition
 fig, ax = plt.subplots(1, 1, figsize=(8, 4))
-ax.plot([B(pointMassPosition, u, s, t, r, 1e4, 5e5) for t in range(int(10 * censusSize))], "-", ms=8, lw=1, label="Neutral")
+ax.plot([B(pointMassPosition, u, s, t, r, 1e4, 5e5) for t in range(int(censusSize))], "-", ms=8, lw=1, label="Neutral")
 ax.set_xlabel("Time in past")
 ax.set_ylabel("B(t)")
 ax.legend();

@@ -4,10 +4,14 @@ import math
 import matplotlib.pylab as plt
 import os
 import pandas as pd
+from datetime import datetime
 
 # hardcoding some parameters
 tol = 1e-4
 sample_size = 40
+
+def current_time():
+    return " [" + datetime.strftime(datetime.now(), "%Y-%m-%d %H:%M:%S") + "]"
 
 def pointMassContribution(pos, scaledu, s, t, r, focalPos):
     return - scaledu / s * (s / (r * abs(pos-focalPos) + s) * (1 - math.exp(- r * abs(pos-focalPos) * t - s * t)))**2
@@ -25,14 +29,25 @@ def getSizeFun(positions, u, s, r, regionSize, focalPos, censusSize, tol):
         getSizeFun_maps()
     # rescale u for each region, eventually region size will be a vector, u could also change??
     scaledu = u * regionSize
+    
+    diff = 100
+    start = 1
+    i = 0
+    while abs(diff) > tol:
+        end = B(positions, u, s, (i + 1) * censusSize / 10, r, regionSize, focalPos)
+        diff = end - start
+        start = end
+        i += 1
+    
+    i - 1
     # finding B(t) at several time points
     # TODO need to do something to deal with longer times to reach equil
-    testFun = [B(positions, u, s, t, r, regionSize, focalPos) for t in range(0,int(10 * censusSize),int(censusSize/10))]
+    # testFun = [B(positions, u, s, t, r, regionSize, focalPos) for t in range(0,int(10 * censusSize),int(censusSize/10))]
     # finding when equilibrium is reached
-    diffs = [testFun[i+1] - testFun[i] for i in range(len(testFun)-1)]
-    ancTime = next((i for i,x in enumerate(diffs) if abs(x) < tol), None)
+    # diffs = [testFun[i+1] - testFun[i] for i in range(len(testFun)-1)]
+    # ancTime = next((i for i,x in enumerate(diffs) if abs(x) < tol), None)
     # time to equil B(t) in generations
-    ancTime = censusSize / 10 * ancTime 
+    ancTime = censusSize / 10 * i 
     # need to think about what happens if ancTime exceeds censusSize (the largest time considered above)
     ancB = B(positions, u, s, ancTime, r, regionSize, focalPos) 
     ancNe = ancB * censusSize 
@@ -41,10 +56,22 @@ def getSizeFun(positions, u, s, r, regionSize, focalPos, censusSize, tol):
 def getSizeFun_maps(positions, u, s, r, focalPos, censusSize, tol):
     scaledu = [z * (y - x) for x,y,z in u]
     recDist = [getRecDist(pos, r, focalPos) for pos in positions]
-    testFun = [B_maps(scaledu, s, t, recDist) for t in range(0,int(10 * censusSize),int(censusSize/10))]  
-    diffs = [testFun[i+1] - testFun[i] for i in range(len(testFun)-1)]
-    ancTime = next((i for i,x in enumerate(diffs) if abs(x) < tol), None)
-    ancTime = censusSize / 10 * ancTime 
+    
+    diff = 100
+    start = 1
+    i = 0
+    while abs(diff) > tol:
+        end = B_maps(scaledu, s, (i + 1) * censusSize / 10, recDist)
+        diff = end - start
+        start = end
+        i += 1
+    
+    i - 1
+    
+    # testFun = [B_maps(scaledu, s, t, recDist) for t in range(0,int(10 * censusSize),int(censusSize/10))]  
+    # diffs = [testFun[i+1] - testFun[i] for i in range(len(testFun)-1)]
+    # ancTime = next((i for i,x in enumerate(diffs) if abs(x) < tol), None)
+    ancTime = censusSize / 10 * i 
     ancB = B_maps(scaledu, s, ancTime, recDist)
     ancNe = ancB * censusSize 
     return(lambda t: [math.exp(sum([rescaledPointMassContribution_map(u, s, t, r, ancNe, ancTime) for u,r in zip(scaledu, recDist)])) / ancB], ancTime, ancNe)
@@ -62,14 +89,42 @@ def pointMassContribution_map(u, s, t, r):
 def getRecDist(pos, r, focalPos):
     left = min(pos, focalPos)
     right = max(pos, focalPos)
-    leftIndex = [i for i,x in enumerate(r) if x[1] > left and x[0] < left][0] # todo could probably speed this up
-    rightIndex = [i for i,x in enumerate(r) if x[1] > right and x[0] < right][0]
+    
+    # startTime = datetime.now()
+    i = 0
+    done = True
+    leftCount = 0
+    rightCount = 0
+    while done:
+        x = r[i]
+        if x[1] > left and x[0] < left:
+            leftCount += 1
+            leftIndex = i
+        if x[1] > right and x[0] < right:
+            rightCount += 1
+            rightIndex = i
+            done = False
+        i += 1
+    # endTime = datetime.now()
+    # endTime - startTime
+    
+    # startTime = datetime.now()
+    # leftIndex = [i for i,x in enumerate(r) if x[1] > left and x[0] < left][0] # todo could probably speed this up
+    # rightIndex = [i for i,x in enumerate(r) if x[1] > right and x[0] < right][0]
+    # endTime = datetime.now()
+    # endTime - startTime
+    
     rleft = r[leftIndex]
     rright = r[rightIndex]
-    intermediate = r[(leftIndex + 1):(rightIndex-1)]    
-    bigR = [(y - x) * z for x,y,z in intermediate]
-    bigR.append((rleft[1]-left) * rleft[2]) # todo need to deal with possibility left and right are inside the same window
-    bigR.append((right-rright[0]) * rright[2])
+    
+    if leftIndex == rightIndex:
+        bigR = [(right - left) * rleft[2]]
+    else:
+        intermediate = r[(leftIndex + 1):(rightIndex-1)]    
+        bigR = [(y - x) * z for x,y,z in intermediate]
+        bigR.append((rleft[1]-left) * rleft[2]) # todo need to deal with possibility left and right are inside the same window
+        bigR.append((right-rright[0]) * rright[2])
+        
     bigR = np.sum(bigR)
     return (1 - np.exp(- 2 * bigR)) / 2
 
@@ -164,13 +219,44 @@ def simplify_rate_map(data):
     return merged
 
 def make_exon_only_mutmap(mutMap, exonMap):
+    # startTime = datetime.now()
     exonMutMap = []
-    for m_start, m_end, mu in mutMap:
-        for e_start, e_end in exonMap:
+    i = 0
+    for e_start, e_end in exonMap:
+        # if e_start == prob:
+        #     break
+        inter = None
+        i -= 1 
+        while inter is None:
+            i += 1
+            m_start, m_end, mu = mutMap[i]
+            inter = intersect(m_start, m_end, e_start, e_end)
+        i -= 1
+        while inter is not None:
+            i += 1
+            m_start, m_end, mu = mutMap[i]
             inter = intersect(m_start, m_end, e_start, e_end)
             if inter is not None:
                 beg, end = inter
                 exonMutMap.append([beg, end, mu])
+        i -= 1 # want to repeat same window of mutmap for next exon
+
+    # endTime = datetime.now()
+    # endTime - startTime
+    # test = exonMutMap
+    
+    # startTime = datetime.now()
+    # exonMutMap = []
+    # for m_start, m_end, mu in mutMap:
+    #     for e_start, e_end in exonMap:
+    #         inter = intersect(m_start, m_end, e_start, e_end)
+    #         if inter is not None:
+    #             beg, end = inter
+    #             exonMutMap.append([beg, end, mu])
+    # bench = exonMutMap
+    # endTime = datetime.now()
+    # endTime - startTime            
+    
     totalRate = get_total_rate(exonMutMap)
     return exonMutMap, totalRate
 
@@ -188,6 +274,46 @@ def get_total_rate(xMap):
 def get_max_positions(recMap, mutMap):
     return max(recMap[-1][1], mutMap[-1][1])
 
+def combine_and_split_regions(exonMutMap, targetSize = 1e4):
+    combined = []
+    problems = []
+    tmp = []
+    i = 0
+    tmp_start = exonMutMap[0][0]
+    for start, stop, mu in exonMutMap:
+        if (abs(start - tmp_start) < targetSize):
+            tmp.append([start, stop, mu])
+        else:
+            new_start = tmp[0][0]
+            new_end = tmp[-1][1]
+            new_L = new_end - new_start
+            old_U = np.sum([(y-x)*z for x,y,z in tmp])
+            new_mu = old_U / new_L
+            
+            # if i > 1:
+            #     break
+            # i += 1
+            
+            if old_U != (new_end - new_start) * new_mu: #TODO getting different total rates
+                problems.append(tmp)
+                # i += 1
+                # if i >0:
+                #     break
+
+            combined.append([new_start, new_end, new_mu])
+            tmp = [[start, stop, mu]]
+            tmp_start = start
+         
+err = []     
+for tmp in problems:
+    new_start = tmp[0][0]
+    new_end = tmp[-1][1]
+    new_L = new_end - new_start
+    old_U = np.sum([(y-x)*z for x,y,z in tmp])
+    new_mu = old_U / new_L
+    err.append([old_U, (new_end - new_start) * new_mu])
+    
+
 os.chdir("/media/nathan/T7/BGSdemo/humanData")
 recName = "YRI_recombination_map_hg38_chr_22.bed"
 mutName = "roulette_tbl_chr22.csv"
@@ -199,8 +325,6 @@ exonMap = read_exon_map(exonName)
 recMap = simplify_rate_map(recMap)
 mutMap = simplify_rate_map(mutMap)
 
-# todo fix demo for B ancTime > oldest demo event
-# todo change test fun
 # todo what if a region is too large
 exonMutMap, U = make_exon_only_mutmap(mutMap, exonMap) # todo fix slow
 
@@ -301,71 +425,71 @@ for i, j in zip(x, y):
     ax.annotate(str(j), xy=(i, j), xytext=(i + 0.2, j + 0.8),
                 arrowprops=dict(facecolor='black', shrink=0.05))
 
-ax.set_xlabel("X-axis")
-ax.set_ylabel("Y-axis")
-ax.set_title("Plot with annotated values")
-plt.show()
+# ax.set_xlabel("X-axis")
+# ax.set_ylabel("Y-axis")
+# ax.set_title("Plot with annotated values")
+# plt.show()
 
-# moments.Plotting.plot_1d_comp_Poisson(fs*8e-4, projData*2e-8)
+# # moments.Plotting.plot_1d_comp_Poisson(fs*8e-4, projData*2e-8)
 
-for curs in [1e-3, 5e-3, 1e-2]:
-    for curN in [1e3, 5e3, 1e4]:
-        simData = pd.read_csv(str(curs) + "_" + str(int(curN)) + ".csv", header = None)
-        simData = simData[0].to_numpy()
-        simData = moments.Spectrum(simData,data_folded=False) / 11 / 1000
-        projData = simData.project([sample_size])
-        fs = moments.Demographics1D.snm([sample_size])
+# for curs in [1e-3, 5e-3, 1e-2]:
+#     for curN in [1e3, 5e3, 1e4]:
+#         simData = pd.read_csv(str(curs) + "_" + str(int(curN)) + ".csv", header = None)
+#         simData = simData[0].to_numpy()
+#         simData = moments.Spectrum(simData,data_folded=False) / 11 / 1000
+#         projData = simData.project([sample_size])
+#         fs = moments.Demographics1D.snm([sample_size])
         
-        # fs_neu = moments.Spectrum(moments.Demographics1D.snm([sample_size]))
-        # fig, ax = plt.subplots(1, 1, figsize=(8, 4))
-        # ax.plot(fs, ".-", ms=8, lw=1, label="neg sel")
-        # ax.plot(fs_neu, "+-", ms=8, lw=1, label="neutral")
-        # ax.set_xlabel("Allele frequency")
-        # ax.set_ylabel("Density")
-        # ax.set_title("s = " + str(curs) + ", N = " + str(int(curN)))
-        # ax.legend();
+#         # fs_neu = moments.Spectrum(moments.Demographics1D.snm([sample_size]))
+#         # fig, ax = plt.subplots(1, 1, figsize=(8, 4))
+#         # ax.plot(fs, ".-", ms=8, lw=1, label="neg sel")
+#         # ax.plot(fs_neu, "+-", ms=8, lw=1, label="neutral")
+#         # ax.set_xlabel("Allele frequency")
+#         # ax.set_ylabel("Density")
+#         # ax.set_title("s = " + str(curs) + ", N = " + str(int(curN)))
+#         # ax.legend();
         
-        f, ancTime, ancNe = getSizeFun(pointMassPosition, u, curs, r, regionSize, focalPos, curN, tol)
+#         f, ancTime, ancNe = getSizeFun(pointMassPosition, u, curs, r, regionSize, focalPos, curN, tol)
         
-        # fig, ax = plt.subplots(1, 1, figsize=(8, 4))
-        # ax.plot(np.arange(0,ancTime / 2 / ancNe, 0.001),[f(t) for t in np.arange(0,ancTime / 2 / ancNe, 0.001)], "-", ms=8, lw=1, label="getSizefun")
-        # ax.set_xlabel("Time in past")
-        # ax.set_ylabel("B(t)")
-        # ax.set_title("s = " + str(curs) + ", N = " + str(int(curN)))
-        # ax.legend();
+#         # fig, ax = plt.subplots(1, 1, figsize=(8, 4))
+#         # ax.plot(np.arange(0,ancTime / 2 / ancNe, 0.001),[f(t) for t in np.arange(0,ancTime / 2 / ancNe, 0.001)], "-", ms=8, lw=1, label="getSizefun")
+#         # ax.set_xlabel("Time in past")
+#         # ax.set_ylabel("B(t)")
+#         # ax.set_title("s = " + str(curs) + ", N = " + str(int(curN)))
+#         # ax.legend();
         
-        # gamma_f = lambda t: [- 2 * ancNe * curs * x for x in f(t)]
-        # fs = moments.Spectrum(moments.LinearSystem_1D.steady_state_1D(sample_size, gamma = - 2 * ancNe * curs))
-        # fs.integrate(f, ancTime / 2 / ancNe, gamma = gamma_f, h = 1/2, adapt_dt=True)
+#         # gamma_f = lambda t: [- 2 * ancNe * curs * x for x in f(t)]
+#         # fs = moments.Spectrum(moments.LinearSystem_1D.steady_state_1D(sample_size, gamma = - 2 * ancNe * curs))
+#         # fs.integrate(f, ancTime / 2 / ancNe, gamma = gamma_f, h = 1/2, adapt_dt=True)
         
-        gamma_f = lambda t: [- 2 * ancNe * curs * x for x in f(t)]
-        fs = moments.Spectrum(moments.LinearSystem_1D.steady_state_1D(sample_size, gamma = - 2 * ancNe * curs))
-        fs.integrate(f, ancTime / 2 / ancNe, gamma = - 2 * ancNe * curs, h = 1/2, adapt_dt=True)
+#         gamma_f = lambda t: [- 2 * ancNe * curs * x for x in f(t)]
+#         fs = moments.Spectrum(moments.LinearSystem_1D.steady_state_1D(sample_size, gamma = - 2 * ancNe * curs))
+#         fs.integrate(f, ancTime / 2 / ancNe, gamma = - 2 * ancNe * curs, h = 1/2, adapt_dt=True)
         
-        fs_indep = moments.Spectrum(moments.LinearSystem_1D.steady_state_1D(sample_size, gamma = - 2 * curN * curs))
+#         fs_indep = moments.Spectrum(moments.LinearSystem_1D.steady_state_1D(sample_size, gamma = - 2 * curN * curs))
 
-        if curwi == "wi5e4.csv":
-            fs = fs *  4 * 2 * 5e4 * 1e-8 * ancNe
-            fs_indep = fs_indep * 4 * 2 * 5e4 * 1e-8 * curN
-            projData = projData 
-        if curwi == "wi1e5.csv":
-            fs = fs *  4 * 2 * 1e5 * 1e-8 * ancNe
-            fs_indep = fs_indep * 4 * 2 * 1e5 * 1e-8 * curN
-            projData = projData 
+#         if curwi == "wi5e4.csv":
+#             fs = fs *  4 * 2 * 5e4 * 1e-8 * ancNe
+#             fs_indep = fs_indep * 4 * 2 * 5e4 * 1e-8 * curN
+#             projData = projData 
+#         if curwi == "wi1e5.csv":
+#             fs = fs *  4 * 2 * 1e5 * 1e-8 * ancNe
+#             fs_indep = fs_indep * 4 * 2 * 1e5 * 1e-8 * curN
+#             projData = projData 
         
         
-        # fs = fs / fs[1]
-        # fs_indep = fs_indep / fs_indep[1]
-        # projData = projData / projData[1]
+#         # fs = fs / fs[1]
+#         # fs_indep = fs_indep / fs_indep[1]
+#         # projData = projData / projData[1]
         
-        fig, ax = plt.subplots(1, 1, figsize=(8, 4))
-        ax.plot(fs, ".-", ms=8, lw=1, label="BGS")
-        ax.plot(fs_neu, "+-", ms=8, lw=1, label="neutral")
-        ax.plot(projData, "x-", ms=8, lw=1, label="fwdpy")
-        ax.set_xlabel("Allele frequency")
-        ax.set_ylabel("Density")
-        ax.set_title("s = " + str(curs) + ", N = " + str(int(curN)))
-        ax.annotate("B=" + str(round(fs.pi()/fs_neu.pi(),3)),xy=(max(fs[1:-1]),sample_size * 0.9))
-        ax.legend();
+#         fig, ax = plt.subplots(1, 1, figsize=(8, 4))
+#         ax.plot(fs, ".-", ms=8, lw=1, label="BGS")
+#         ax.plot(fs_neu, "+-", ms=8, lw=1, label="neutral")
+#         ax.plot(projData, "x-", ms=8, lw=1, label="fwdpy")
+#         ax.set_xlabel("Allele frequency")
+#         ax.set_ylabel("Density")
+#         ax.set_title("s = " + str(curs) + ", N = " + str(int(curN)))
+#         ax.annotate("B=" + str(round(fs.pi()/fs_neu.pi(),3)),xy=(max(fs[1:-1]),sample_size * 0.9))
+#         ax.legend();
         
         
