@@ -97,10 +97,10 @@ def getRecDist(pos, r, focalPos):
     rightCount = 0
     while done:
         x = r[i]
-        if x[1] > left and x[0] < left:
+        if x[1] >= left and x[0] <= left:
             leftCount += 1
             leftIndex = i
-        if x[1] > right and x[0] < right:
+        if x[1] >= right and x[0] <= right:
             rightCount += 1
             rightIndex = i
             done = False
@@ -110,7 +110,7 @@ def getRecDist(pos, r, focalPos):
     
     # startTime = datetime.now()
     # leftIndex = [i for i,x in enumerate(r) if x[1] > left and x[0] < left][0] # todo could probably speed this up
-    # rightIndex = [i for i,x in enumerate(r) if x[1] > right and x[0] < right][0]
+    # rightIndex = [i for i,x in enumerate(r) if x[1] > right and x[0] < right][0] # todo missing equals
     # endTime = datetime.now()
     # endTime - startTime
     
@@ -127,6 +127,8 @@ def getRecDist(pos, r, focalPos):
         
     bigR = np.sum(bigR)
     return (1 - np.exp(- 2 * bigR)) / 2
+
+
 
 # f, ancTime, ancNe = getSizeFun_maps(midPoints, exonMutMap, curs, recMap, focalPos, curN, tol)
 
@@ -274,11 +276,10 @@ def get_total_rate(xMap):
 def get_max_positions(recMap, mutMap):
     return max(recMap[-1][1], mutMap[-1][1])
 
+# todo still need to split but none of them are that big
 def combine_and_split_regions(exonMutMap, targetSize = 1e4):
     combined = []
-    problems = []
     tmp = []
-    i = 0
     tmp_start = exonMutMap[0][0]
     for start, stop, mu in exonMutMap:
         if (abs(start - tmp_start) < targetSize):
@@ -289,29 +290,20 @@ def combine_and_split_regions(exonMutMap, targetSize = 1e4):
             new_L = new_end - new_start
             old_U = np.sum([(y-x)*z for x,y,z in tmp])
             new_mu = old_U / new_L
-            
-            # if i > 1:
-            #     break
-            # i += 1
-            
-            if old_U != (new_end - new_start) * new_mu: #TODO getting different total rates
-                problems.append(tmp)
-                # i += 1
-                # if i >0:
-                #     break
 
             combined.append([new_start, new_end, new_mu])
             tmp = [[start, stop, mu]]
             tmp_start = start
          
-err = []     
-for tmp in problems:
     new_start = tmp[0][0]
     new_end = tmp[-1][1]
     new_L = new_end - new_start
     old_U = np.sum([(y-x)*z for x,y,z in tmp])
     new_mu = old_U / new_L
-    err.append([old_U, (new_end - new_start) * new_mu])
+    combined.append([new_start, new_end, new_mu])
+    
+    return combined
+
     
 
 os.chdir("/media/nathan/T7/BGSdemo/humanData")
@@ -327,6 +319,7 @@ mutMap = simplify_rate_map(mutMap)
 
 # todo what if a region is too large
 exonMutMap, U = make_exon_only_mutmap(mutMap, exonMap) # todo fix slow
+exonMutMap = combine_and_split_regions(exonMutMap)
 
 L = get_max_positions(recMap, mutMap)
 focalPos = L/2
