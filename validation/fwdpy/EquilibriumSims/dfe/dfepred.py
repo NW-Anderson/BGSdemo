@@ -5,7 +5,7 @@ import matplotlib.pylab as plt
 import os
 import pandas as pd
 
-os.chdir("/media/nathan/T7/BGSdemo/equilAFS")
+os.chdir("/media/nathan/T7/BGSdemo/dfeAFS")
 
 # hardcoding some parameters
 u = 1e-8
@@ -53,14 +53,41 @@ def getSizeFun(positions, u, s, r, regionSize, focalPos, censusSize, tol):
     ancNe = ancB * censusSize 
     return(lambda t: [math.exp(sum([rescaledPointMassContribution(pos, scaledu, s, t, r, focalPos, ancNe, ancTime) for pos in positions])) / ancB], ancTime, ancNe)
 
+def B_dfe(positions, u, ss, ps, t, r, regionSize, focalPos):
+    scaledu = u * regionSize
+    contributions = [p * pointMassContribution(pos, scaledu, s, t, r, focalPos) for pos in positions for p,s in zip(ps,ss)]
+    return math.exp(sum(contributions))
+
+def getSizeFun_dfe(positions, u, ss, ps, r, regionSize, focalPos, censusSize, tol):
+    # rescale u for each region, eventually region size will be a vector, u could also change??
+    scaledu = u * regionSize
+    # finding B(t) at several time points
+    diff = 100
+    start = 1
+    i = 0
+    while abs(diff) > tol:
+        end = B_dfe(positions, u, ss, ps, (i + 1) * censusSize / 10, r, regionSize, focalPos)
+        diff = end - start
+        start = end
+        i += 1
+    
+    # time to equil B(t) in generations
+    ancTime = censusSize / 10 * i 
+    # need to think about what happens if ancTime exceeds censusSize (the largest time considered above)
+    ancB = B_dfe(positions, u, ss, ps, ancTime, r, regionSize, focalPos) 
+    ancNe = ancB * censusSize 
+    return(lambda t: [math.exp(sum([p * rescaledPointMassContribution(pos, scaledu, s, t, r, focalPos, ancNe, ancTime) for pos in positions for p,s in zip(ps,ss)])) / ancB], ancTime, ancNe)
+
 # s = curs
 # censusSize = curN
-# positions = pointMassPosition
-# fig, ax = plt.subplots(1, 1, figsize=(8, 4))
-# ax.plot([B(pointMassPosition, u, s, t, r, 1e4, 5e5) for t in range(int(10 * curN))], "-", ms=8, lw=1, label="Neutral")
-# ax.set_xlabel("Time in past")
-# ax.set_ylabel("B(t)")
-# ax.legend();
+positions = pointMassPosition
+fig, ax = plt.subplots(1, 1, figsize=(8, 4))
+ax.plot([B(pointMassPosition, u, 0.01, t, r, 1e4, 5e5) for t in range(int(10 * curN))], "-", ms=8, lw=1, label="0.01")
+ax.plot([B(pointMassPosition, u, 0.005, t, r, 1e4, 5e5) for t in range(int(10 * curN))], "-", ms=8, lw=1, label="0.005")
+ax.plot([B_dfe(pointMassPosition, u, ss, ps, t, r, 1e4, 5e5) for t in range(int(10 * curN))], "-", ms=8, lw=1, label="avg")
+ax.set_xlabel("Time in past")
+ax.set_ylabel("B(t)")
+ax.legend();
 
 # for curs in [1e-3, 5e-3, 1e-2]:
 #     for curN in [1e3, 5e3, 1e4]:
@@ -74,12 +101,15 @@ for i in range(3):
         p = [0.25, 0.5, 0.75][i]
         curN = [1e3, 5e3, 1e4][j]
         
-        simData = pd.read_csv(str(curs) + "_" + str(int(curN)) + ".csv", header = None)
+        simData = pd.read_csv(str(p) + "_" + str(int(curN)) + ".csv", header = None)
         simData = simData[0].to_numpy()
         simData = moments.Spectrum(simData,data_folded=False)
         projData = simData.project([sample_size])
         fs = moments.Demographics1D.snm([sample_size])
-        f, ancTime, ancNe = getSizeFun(pointMassPosition, u, curs, r, regionSize, focalPos, curN, tol)
+        
+        ps = [p,1-p]
+        ss = [0.01, 0.005]
+        f, ancTime, ancNe = getSizeFun_dfe(pointMassPosition, u, ss, ps, r, regionSize, focalPos, curN, tol)
         
         # fig, ax = plt.subplots(1, 1, figsize=(8, 4))
         # ax.plot(np.arange(0,ancTime / 2 / ancNe, 0.001),[f(t) for t in np.arange(0,ancTime / 2 / ancNe, 0.001)], "-", ms=8, lw=1, label="getSizefun")
@@ -107,7 +137,7 @@ for i in range(3):
         ax[i,j].plot(fs, ".-", ms=8, lw=1, label="BGS")
         ax[i,j].plot(projData, "x-", ms=8, lw=1, label="fwdpy")
         ax[i,j].plot(fs_neu, "+-", ms=8, lw=1, label="SNM")
-        ax[i,j].set_title("s = " + str(curs) + ", N = " + str(int(curN)))
+        ax[i,j].set_title("p = " + str(p) + ", N = " + str(int(curN)))
         ax[i,j].set_yscale('log')
         if np.logical_and(i == 2, j == 2):
             ax[i,j].legend();
