@@ -250,37 +250,7 @@ def get_scaling_fun(positions, u, ss, ps, r, focalPos, censusSize, totalT, tol):
     ancNe = ancB * censusSize
     return(lambda t: [math.exp(sum([p * rescaledPointMassContribution(u, s, t, r, ancNe, ancTime) for u,r in zip(scaledu, recDist) for p,s in zip(ps, ss)])) / ancB], ancTime, ancNe)
 
-def bFromDemes(positions, u, s, r, regionSize, focalPos, demesFile, tol):
-    graph = demes.load(demesFile)
-    if graph.time_units != "generations":
-        graph = graph.in_generations()
-    scaledu = u * regionSize
-    oldestEpoch, censusSize = getOldestEpoch(graph)
-    
-    diff = 100
-    start = 1
-    i = 0
-    while abs(diff) > tol:
-        end = B(positions, u, s, (i + 1) * censusSize / 10, r, regionSize, focalPos)
-        diff = end - start
-        start = end
-        i += 1
-    
-    i - 1
-    
-    # testFun = [B(positions, u, s, t, r, regionSize, focalPos) for t in range(0,int(10 * censusSize),int(censusSize/10))]
-    # diffs = [testFun[i+1] - testFun[i] for i in range(len(testFun)-1)]
-    # ancTime = next((i for i,x in enumerate(diffs) if abs(x) < tol), None)
-    
-    ancTime = censusSize / 10 * i 
-    # if ancTime > oldestEpoch:
-    #     print("woah there partner")
-    ancTime = max(ancTime, oldestEpoch)
-    ancB = B(positions, u, s, ancTime, r, regionSize, focalPos) 
-    ancNe = ancB * censusSize 
-    return(lambda t: [math.exp(sum([rescaledPointMassContribution(pos, scaledu, s, t, r, focalPos, ancNe, ancTime) for pos in positions])) / ancB], ancTime, ancNe)
-    
-def test_inputs():
+def test_inputs(): # TODO finish
     # TODO make test input function
     if type(u) is not list and type(r) is not list and L is None:
             raise ValueError("If u and r are constant than the chrom. size, L, must be specified.")
@@ -747,49 +717,49 @@ def _make_nu_func_bgs(sizes, T, Ne, T_elapsed, scaling_fun):
         # check that this is correct, or if we have to "pin" parameters
     return nu_func
 
-# human maps
-os.chdir("/home/nathan/Documents/GitHub/BGSdemo/validation/fwdpy/EquilibriumSims/humanMaps")
-recName = "YRI_recombination_map_hg38_chr_22.bed"
-mutName = "roulette_tbl_chr22.csv"
-exonName = "exons_chr22.bed"
-recMap = read_rec_map(recName)
-mutMap = read_mut_rates(mutName)
-exonMap = read_exon_map(exonName)
+# # human maps
+# os.chdir("/home/nathan/Documents/GitHub/BGSdemo/validation/fwdpy/EquilibriumSims/humanMaps")
+# recName = "YRI_recombination_map_hg38_chr_22.bed"
+# mutName = "roulette_tbl_chr22.csv"
+# exonName = "exons_chr22.bed"
+# recMap = read_rec_map(recName)
+# mutMap = read_mut_rates(mutName)
+# exonMap = read_exon_map(exonName)
 
-recMap = simplify_rate_map(recMap)
-mutMap = simplify_rate_map(mutMap)
+# recMap = simplify_rate_map(recMap)
+# mutMap = simplify_rate_map(mutMap)
 
-exonMutMap, U = make_exon_only_mutmap(mutMap, exonMap) # TODO need to impliment splitting large regions
+# exonMutMap, U = make_exon_only_mutmap(mutMap, exonMap) # TODO need to impliment splitting large regions
 
-# hardcoding some parameters
-u = 1e-8
-# u = exonMutMap
-r = 1e-8
-# r = recMap
-L = 1e6
-# L = None
-focalPos = 5e5
-# focalPos = r[-1][1] / 2
-sample_size = [40]
-ss = [1e-2]
-# ss = [1e-2, 5e-3]
+# # hardcoding some parameters
+# u = 1e-8
+# # u = exonMutMap
+# r = 1e-8
+# # r = recMap
+# L = 1e6
+# # L = None
+# focalPos = 5e5
+# # focalPos = r[-1][1] / 2
+# sample_size = [40]
+# ss = [1e-2]
+# # ss = [1e-2, 5e-3]
 
-# cs = lambda t: [1e3 + 2 * 1e3 * t]
-# cs = [1e3]
-# totalT = 1
-# totalT = 0
-cs = None
-totalT = None
+# # cs = lambda t: [1e3 + 2 * 1e3 * t]
+# # cs = [1e3]
+# # totalT = 1
+# # totalT = 0
+# cs = None
+# totalT = None
 
-os.chdir("/home/nathan/Documents/GitHub/BGSdemo/validation/fwdpy/DemographicSims/ooa/threepop")
+# os.chdir("/home/nathan/Documents/GitHub/BGSdemo/validation/fwdpy/DemographicSims/ooa/threepop")
 
-# g = None
-g = 'ooa.yaml'
-sampled_demes = ["CEU"]
-ps = None
-targetSize = 1e4
-tol = 1e-4
-minPos = 0
+# # g = None
+# g = 'ooa.yaml'
+# sampled_demes = ["CEU"]
+# ps = None
+# targetSize = 1e4
+# tol = 1e-4
+# minPos = 0
 
 # positions of point masses.
 # split 1Mb into 10kb regions, each point mass lies at the center
@@ -799,6 +769,7 @@ minPos = 0
 #############################
 ######## integrated #########
 #############################
+# TODO selection
 def bgs_wrapper(u,
                 r,
                 focalPos,
@@ -842,6 +813,7 @@ def bgs_wrapper(u,
         if type(cs) is list: 
             censusSize = cs[0]
             cs = lambda t: [censusSize]
+            totalT = 0
         elif isinstance(cs, types.FunctionType):
             censusSize = cs(0)[0]
             
@@ -854,7 +826,7 @@ def bgs_wrapper(u,
         
         fs.integrate(g, ancTime / 2 / ancNe)
         
-        return fs
+        return fs, ancNe
     else:
         demo = demes.load(g)
         if demo.time_units != "generations":
@@ -875,9 +847,179 @@ def bgs_wrapper(u,
            scaling_fun=f
        )
         
-        return fs
-    # oldestEpoch, censusSize = getOldestEpoch(graph). if g statement?
+        return fs, ancNe
 
+###################################
+# equilibrium selected focal site #
+###################################
+
+
+###################
+# equilibrium dfe #
+###################
+
+os.chdir("/media/nathan/T7/BGSdemo/dfeAFS")
+u = 1e-8
+r = 1e-8
+L = 1e6
+focalPos = 5e5
+sample_size = 40
+
+
+fig, ax = plt.subplots(3, 3, figsize=(16, 8), sharex=True, sharey=False)
+fig.text(0.5, 0.04, 'Allele Frequency', ha='center')
+fig.text(0.04, 0.5, 'Count', va='center', rotation='vertical')
+fig.subplots_adjust(hspace = .25)
+for i in range(3):
+    for j in range(3):
+        p = [0.25, 0.5, 0.75][i]
+        curN = [1e3, 5e3, 1e4][j]
+        
+        simData = pd.read_csv(str(p) + "_" + str(int(curN)) + ".csv", header = None)
+        simData = simData[0].to_numpy()
+        simData = moments.Spectrum(simData,data_folded=False)
+        projData = simData.project([sample_size])
+                
+        ps = [p,1-p]
+        ss = [0.01, 0.005]
+        
+        fs, ancNe = bgs_wrapper(u = u,
+                                r = r,
+                                focalPos = focalPos,
+                                sample_size = [sample_size],
+                                ss = ss,
+                                ps = ps,
+                                L = L,
+                                cs = [curN])
+        
+        fs_neu = moments.Demographics1D.snm([sample_size])
+        
+        # normalizing based on N and mu 
+        fs = fs * 8 * 1e-8 * ancNe
+        projData = projData * 1e-8
+        fs_neu = fs_neu * 8 * 1e-8 * curN
+        
+        ax[i,j].plot(fs, ".-", ms=8, lw=1, label="BGS")
+        ax[i,j].plot(projData, "x-", ms=8, lw=1, label="fwdpy")
+        ax[i,j].plot(fs_neu, "+-", ms=8, lw=1, label="SNM")
+        ax[i,j].set_title("p = " + str(p) + ", N = " + str(int(curN)))
+        ax[i,j].set_yscale('log')
+        if np.logical_and(i == 2, j == 2):
+            ax[i,j].legend();
+
+##############################################
+# equilibrium human maps neutral focal locus #
+##############################################
+os.chdir("/media/nathan/T7/BGSdemo/humanData")
+recName = "YRI_recombination_map_hg38_chr_22.bed"
+mutName = "roulette_tbl_chr22.csv"
+exonName = "exons_chr22.bed"
+recMap = read_rec_map(recName)
+mutMap = read_mut_rates(mutName)
+exonMap = read_exon_map(exonName)
+
+recMap = simplify_rate_map(recMap)
+mutMap = simplify_rate_map(mutMap)
+
+# todo what if a region is too large
+exonMutMap, U = make_exon_only_mutmap(mutMap, exonMap) 
+
+os.chdir("/media/nathan/T7/BGSdemo/parsedequilHuman5027")
+focalPos = 50270000
+sample_size = 40
+
+fig, ax = plt.subplots(3, 3, figsize=(16, 8), sharex=True, sharey=False)
+fig.text(0.5, 0.04, 'Allele Frequency', ha='center')
+fig.text(0.04, 0.5, 'Count', va='center', rotation='vertical')
+fig.subplots_adjust(hspace = .25)
+
+for i in range(3):
+    for j in range(3):
+        curs = [1e-3, 5e-3, 1e-2][i]
+        curN = [1e3, 5e3, 1e4][j]
+        simData = pd.read_csv(str(curs) + "_" + str(int(curN)) + ".csv", header = None)
+        simData = simData[0].to_numpy()
+        simData = moments.Spectrum(simData,data_folded=False)
+        projData = simData.project([sample_size])
+        
+        fs, ancNe = bgs_wrapper(u = exonMutMap,
+                                r = recMap,
+                                focalPos = focalPos,
+                                sample_size = [sample_size],
+                                ss = [curs],
+                                cs = [curN])
+        
+        fs_neu = moments.Demographics1D.snm([sample_size])
+        
+        # normalizing based on N and mu 
+        # should it be ancNe
+        fs = fs * 8 * 1e-8 * ancNe
+        projData = projData * 1e-8
+        fs_neu = fs_neu * 8 * 1e-8 * curN        
+        
+        ax[i,j].plot(fs, "-", ms=8, lw=1, label="BGS")
+        ax[i,j].plot(projData, "-", ms=8, lw=1, label="fwdpy")
+        ax[i,j].plot(fs_neu, "-", ms=8, lw=1, label="SNM")
+        ax[i,j].set_title("s = " + str(curs) + ", N = " + str(int(curN)))
+        ax[i,j].set_yscale('log')
+        ax[i,j].annotate("B=" + str(round(fs.pi()/fs_neu.pi(),3)),xy=(sample_size / 10, max(fs[1:-1]) * 0.8),size="x-large")
+        ax[i,j].annotate("B_sim=" + str(round(projData.pi()/fs_neu.pi(),3)),xy=(sample_size / 10, max(fs[1:-1]) * 0.55),size="x-large")
+        if np.logical_and(i == 2, j == 2):
+            ax[i,j].legend();
+            
+###################################
+# equilibrium neutral focal locus #
+###################################
+os.chdir("/media/nathan/T7/BGSdemo/equilAFS")
+sample_size = 40
+u = 1e-8
+r = 1e-8
+L = 1e6
+focalPos = 5e5
+fig, ax = plt.subplots(3, 3, figsize=(16, 8), sharex=True, sharey=False)
+fig.text(0.5, 0.04, 'Allele Frequency', ha='center')
+fig.text(0.04, 0.5, 'Count', va='center', rotation='vertical')
+fig.subplots_adjust(hspace = .25)
+for i in range(3):
+    for j in range(3):
+        curs = [1e-3, 5e-3, 1e-2][i]
+        curN = [1e3, 5e3, 1e4][j]
+        simData = pd.read_csv(str(curs) + "_" + str(int(curN)) + ".csv", header = None)
+        simData = simData[0].to_numpy()
+        simData = moments.Spectrum(simData,data_folded=False)
+        projData = simData.project([sample_size])
+        
+        fs, ancNe = bgs_wrapper(u = u,
+                                r = r,
+                                focalPos = focalPos,
+                                sample_size = [sample_size],
+                                ss = [curs],
+                                L = L,
+                                cs = [curN])
+        
+        fs_neu = moments.Demographics1D.snm([sample_size])
+        
+        # normalizing based on N and mu 
+        # should it be ancNe
+        fs = fs * 8 * 1e-8 * ancNe
+        projData = projData * 1e-8
+        fs_neu = fs_neu * 8 * 1e-8 * curN
+        
+        # todo i think the correct thing is tp divide the previous lines by 2
+        # regular theta for a single site and span normalized projData
+        
+        ax[i,j].plot(fs, ".-", ms=8, lw=1, label="BGS")
+        ax[i,j].plot(projData, "x-", ms=8, lw=1, label="fwdpy")
+        ax[i,j].plot(fs_neu, "+-", ms=8, lw=1, label="SNM")
+        ax[i,j].set_title("s = " + str(curs) + ", N = " + str(int(curN)))
+        ax[i,j].set_yscale('log')
+        if np.logical_and(i == 2, j == 2):
+            ax[i,j].legend();
+            
+########
+# misc #
+########
+            
 fig, ax = plt.subplots(1, 1, figsize=(8, 4))
 ax.plot(np.arange(0,ancTime / 2 / ancNe, 0.001),[g(t) for t in np.arange(0,ancTime / 2 / ancNe, 0.001)], "-", ms=8, lw=1, label="g(t)")
 ax.set_xlabel("Time in past")
