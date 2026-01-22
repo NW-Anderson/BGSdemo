@@ -15,6 +15,81 @@ from deme_funs import _get_demographic_events, _get_deme_sample_sizes, _get_root
 # selected vs neutral
 # demes vs nu_func split into two functions?
 
+def unique(thing):
+    tmp = []
+    for x in thing:
+        if x not in tmp:
+            tmp.append(x)
+    return tmp
+
+def parseJointData():
+    os.chdir("/home/nathan/Documents/GitHub/BGSdemo/validation/fwdpy/DemographicSims/ooa/twopop")
+    
+    file_path = "ooaTwoPop.txt"
+    data_list = []
+    
+    with open(file_path, 'r') as file:
+        for line in file:
+            # Split each line by whitespace and append the list of elements
+            # You may want to convert elements to their correct types (e.g., int, float)
+            elements = line.strip().split() 
+            if elements: # Avoid processing empty lines
+                data_list.append(elements)
+                
+    os.chdir("/media/nathan/T7/BGSdemo/ooaTwoPopData/joint")
+    
+    pdata = np.zeros((3,101,101))
+    numSum = np.zeros(3)
+    for s, d, seed in data_list:
+        simData = np.load(seed +'.npy')
+        
+        if s == '0.001':
+            i = 0
+        if s == '0.005':
+            i = 1
+        if s == '0.01':
+            i = 2
+            
+        pdata[i] = np.add(pdata[i], simData)
+        numSum[i] += 1
+    
+    parsedData = [p / n for p,n in zip(pdata, numSum)]
+    return parsedData
+
+def censusFun(demo):
+    def N(t):
+        sizes = []
+        for deme in demo.demes:
+            size_t = None
+            for epoch in deme.epochs:
+                if epoch.end_time <= t < epoch.start_time:
+                    if epoch.size_function == "constant":
+                        size_t = epoch.start_size
+                    else:
+                        dt = (epoch.start_time - t) / epoch.time_span
+                        r = math.log(epoch.end_size / epoch.start_size)
+                        size_t = epoch.start_size * math.exp(r * dt)
+                    break
+            sizes.append(size_t)
+        return sizes
+    return lambda t: N(t)
+
+def reversedCensusFun(demo, ancTime, ancNe):
+    tmp_fun = censusFun(demo)
+    denom = tmp_fun(ancTime)[0]
+
+    def ds(t):
+        # map coalescent time t (in units of ancNe) back to demes time
+        tt = ancTime - t * 2 * ancNe
+        # clamp into [0, ancTime]
+        if tt < 0:
+            tt = 0.0
+            # print("overshoot:", t, "tt:", tt)
+        elif tt > ancTime:
+            tt = ancTime
+        return [x / denom for x in tmp_fun(tt) if x is not None]
+    return ds
+
 def read_rec_map(bed_path):
     intervals = []
     with open(bed_path) as f:
@@ -144,13 +219,30 @@ def get_total_rate(xMap):
     tmp = [rate * (end - start) for start, end, rate in xMap]
     return np.sum(tmp)
 
-# TODO still need to split but none of them are that big
 def combine_and_split_regions(exonMutMap, targetSize = 1e4):
+    # first split
+    split = []
+    for start, stop, mu in exonMutMap:
+        if stop - start > targetSize:
+            i = 2
+            done = True
+            while done:
+                new_stop = start + (stop - start) / i
+                if new_stop - start < targetSize:
+                    new_size = new_stop - start
+                    done = False
+                else:
+                    i += 1
+            tmp = [[start + new_size * j, start + new_size * (j + 1), mu] for j in range(i)]
+            split.extend(tmp)
+        else:
+            split.append([start, stop, mu])
+            
     combined = []
     tmp = []
-    tmp_start = exonMutMap[0][0]
-    for start, stop, mu in exonMutMap:
-        if (abs(start - tmp_start) < targetSize):
+    tmp_start = split[0][0]
+    for start, stop, mu in split:        
+        if (abs(stop - tmp_start) < targetSize):
             tmp.append([start, stop, mu])
         else:
             new_start = tmp[0][0]
@@ -172,6 +264,7 @@ def combine_and_split_regions(exonMutMap, targetSize = 1e4):
     
     return combined
 
+# TODO impliment cumulative rate maps
 def getRecDist(pos, r, focalPos):
     left = min(pos, focalPos)
     right = max(pos, focalPos)
@@ -187,7 +280,7 @@ def getRecDist(pos, r, focalPos):
             leftCount += 1
             leftIndex = i
         if x[1] >= right and x[0] <= right:
-            rightCount += 1
+            rightCount += 1 # TODO I dont think this is needed
             rightIndex = i
             done = False
         i += 1
@@ -208,7 +301,7 @@ def getRecDist(pos, r, focalPos):
     else:
         intermediate = r[(leftIndex + 1):(rightIndex-1)]    
         bigR = [(y - x) * z for x,y,z in intermediate]
-        bigR.append((rleft[1]-left) * rleft[2]) # todo need to deal with possibility left and right are inside the same window
+        bigR.append((rleft[1]-left) * rleft[2]) 
         bigR.append((right-rright[0]) * rright[2])
         
     bigR = np.sum(bigR)
@@ -219,14 +312,6 @@ def pointMassContribution(u, s, t, r):
 
 def B(scaledu, ss, ps, t, recDist):
     return math.exp(sum([p * pointMassContribution(u, s, t, r) for u,r in zip(scaledu, recDist) for p,s in zip(ps, ss)]))
-
-# for pos in positions:
-#     getRecDist(pos, r, focalPos)
-# fig, ax = plt.subplots(1, 1, figsize=(8, 4))
-# ax.plot([B(scaledu, ss, ps, t, recDist) for t in range(int(censusSize))], "-", ms=8, lw=1, label="B(t)")
-# ax.set_xlabel("Time in past")
-# ax.set_ylabel("B(t)")
-# ax.legend();
 
 def rescaledPointMassContribution(scaledu, s, t, r, ancestralNe, ancTime):
     return - scaledu / s * (s / (r + s) * (1 - math.exp(- r * (ancTime - t * 2 * ancestralNe) - s * (ancTime - t * 2 * ancestralNe))))**2
@@ -295,7 +380,71 @@ def getOldestEpoch(graph):
                 size = epoch.start_size
     return tme, size
      
-# TODO rename?           
+def add_new_ancestral_root(graph,
+                          split_time,
+                          new_name='buf',
+                          size=None) -> demes.Graph:
+    """
+    Add a new ancestral deme above the current root(s).
+
+    Parameters
+    ----------
+    graph : demes.Graph
+        Existing demes graph.
+    new_name : str
+        Name for the new ancestral population.
+    split_time : float
+        Time (in generations before present) when the new ancestral ends and the
+        old root(s) begin. Must be > 0 and finite.
+    size : float | None
+        Constant size for the new ancestral. If None, use the first root's
+        initial size (its size at its earliest time) as a default.
+
+    Returns
+    -------
+    demes.Graph
+        New graph with the added ancestral root.
+    """
+    if not (math.isfinite(split_time) and split_time > 0):
+        raise ValueError("split_time must be finite and > 0.")
+    if any(d.name == new_name for d in graph.demes):
+        raise ValueError(f"Deme '{new_name}' already exists.")
+
+    # Convert to a mutable representation
+    d = copy.deepcopy(graph.asdict())
+
+    # Find root demes (no ancestors)
+    root_demes = [deme for deme in d["demes"] if len(deme.get("ancestors", [])) == 0]
+    if len(root_demes) == 0:
+        raise ValueError("No root demes found (unexpected).")
+
+    # Choose a default size if not provided
+    if size is None:
+        # Use the first root's earliest (ancestral) epoch start_size
+        # (In demes dict form, epochs[0]["start_size"] is typically the size at deme start_time.)
+        size = root_demes[0]["epochs"][0]["start_size"]
+
+    # Add the new ancestral deme
+    new_deme = {
+        "name": new_name,
+        "start_time": math.inf,
+        "epochs": [
+            {"end_time": float(split_time), "start_size": float(size)}
+        ],
+    }
+    # d["demes"].append(new_deme)
+    d["demes"].insert(0, new_deme)
+
+    # Re-root each old root under the new ancestral
+    for deme in root_demes:
+        # Ensure the old root starts at split_time (it cannot still start at inf if it has an ancestor).
+        deme["start_time"] = float(split_time)
+        deme["ancestors"] = [new_name]
+        deme["proportions"] = [1.0]
+
+    # Rebuild graph
+    return demes.Graph.fromdict(d)
+
 def SFS_bgs(
     g,
     scaling_fun,
@@ -400,7 +549,7 @@ def SFS_bgs(
     # cs_Ne = _get_root_Ne(g)
     oldest_epoch, cs_Ne  = getOldestEpoch(g)
     if anc_gen > oldest_epoch:
-        g = add_new_ancestral_root(g, ancTime)
+        g = add_new_ancestral_root(g, anc_gen)
     # demesdraw.tubes(g);
     # demesdraw.tubes(test);
     
@@ -717,59 +866,56 @@ def _make_nu_func_bgs(sizes, T, Ne, T_elapsed, scaling_fun):
         # check that this is correct, or if we have to "pin" parameters
     return nu_func
 
-# # human maps
-# os.chdir("/home/nathan/Documents/GitHub/BGSdemo/validation/fwdpy/EquilibriumSims/humanMaps")
-# recName = "YRI_recombination_map_hg38_chr_22.bed"
-# mutName = "roulette_tbl_chr22.csv"
-# exonName = "exons_chr22.bed"
-# recMap = read_rec_map(recName)
-# mutMap = read_mut_rates(mutName)
-# exonMap = read_exon_map(exonName)
+# human maps
+os.chdir("/home/nathan/Documents/GitHub/BGSdemo/validation/fwdpy/EquilibriumSims/humanMaps")
+recName = "YRI_recombination_map_hg38_chr_22.bed"
+mutName = "roulette_tbl_chr22.csv"
+exonName = "exons_chr22.bed"
+recMap = read_rec_map(recName)
+mutMap = read_mut_rates(mutName)
+exonMap = read_exon_map(exonName)
 
-# recMap = simplify_rate_map(recMap)
-# mutMap = simplify_rate_map(mutMap)
+recMap = simplify_rate_map(recMap)
+mutMap = simplify_rate_map(mutMap)
 
-# exonMutMap, U = make_exon_only_mutmap(mutMap, exonMap) # TODO need to impliment splitting large regions
+exonMutMap, U = make_exon_only_mutmap(mutMap, exonMap) # TODO need to impliment splitting large regions
 
-# # hardcoding some parameters
-# u = 1e-8
-# # u = exonMutMap
+# hardcoding some parameters
+u = 1e-8
+# u = exonMutMap
 # r = 1e-8
-# # r = recMap
+r = recMap
 # L = 1e6
-# # L = None
+L = None
 # focalPos = 5e5
-# # focalPos = r[-1][1] / 2
-# sample_size = [40]
-# ss = [1e-2]
-# # ss = [1e-2, 5e-3]
+focalPos = r[-1][1] / 2
+sample_size = [40]
+ss = [1e-2]
+# ss = [1e-2, 5e-3]
 
-# # cs = lambda t: [1e3 + 2 * 1e3 * t]
-# # cs = [1e3]
-# # totalT = 1
-# # totalT = 0
+cs = lambda t: [1e3 + 2 * 1e3 * t]
+# cs = [1e3]
+totalT = 1
+# totalT = 0
 # cs = None
 # totalT = None
 
 # os.chdir("/home/nathan/Documents/GitHub/BGSdemo/validation/fwdpy/DemographicSims/ooa/threepop")
 
-# # g = None
+g = None
+sampled_demes = None
 # g = 'ooa.yaml'
 # sampled_demes = ["CEU"]
-# ps = None
-# targetSize = 1e4
-# tol = 1e-4
-# minPos = 0
+ps = None
+targetSize = 1e4
+tol = 1e-4
+minPos = 0
 
-# positions of point masses.
-# split 1Mb into 10kb regions, each point mass lies at the center
-# of these regions 
-# pointMassPosition = range(int(5e3),int(100.5e4),int(1e4))
+# TODO selection on a graph
 
 #############################
 ######## integrated #########
 #############################
-# TODO selection
 def bgs_wrapper(u,
                 r,
                 focalPos,
@@ -783,15 +929,15 @@ def bgs_wrapper(u,
                 ps = None,
                 targetSize = 1e4,
                 tol = 1e-4,
-                minPos = 0
+                minPos = 0,
+                focal_s = None
                 ):
-    
     if L is None: # TODO may need to set minPos even if L is specified
         if type(u) is list:
             L = u[-1][1]
             minPos = u[0][0]
         if type(r) is list:
-            L = r[-1][1] # this is assert if L is not specified
+            L = r[-1][1] # TODO this is assert if L is not specified
             minPos = r[0][0]
         
     if type(u) is list:
@@ -817,28 +963,31 @@ def bgs_wrapper(u,
         elif isinstance(cs, types.FunctionType):
             censusSize = cs(0)[0]
             
+        f, ancTime, ancNe = get_scaling_fun(positions, u, ss, ps, r, focalPos, censusSize, totalT, tol)
         rescaledcs = lambda t: [cs(t / censusSize * ancNe)[0] / censusSize] # TODO need to deal with B(t) being longer than cs
             
-        fs = moments.Demographics1D.snm(sample_size)
-        f, ancTime, ancNe = get_scaling_fun(positions, u, ss, ps, r, focalPos, censusSize, totalT, tol)
-        
         g = lambda t: [x * y for x,y in zip(f(t), rescaledcs(t))]
-        
-        fs.integrate(g, ancTime / 2 / ancNe)
+
+        if focal_s is None:
+            fs = moments.Demographics1D.snm(sample_size)
+            fs.integrate(g, ancTime / 2 / ancNe)
+        else: 
+            fs = moments.Spectrum(moments.LinearSystem_1D.steady_state_1D(sample_size[0], gamma = - 2 * ancNe * focal_s)) # TODO only valid for single pop
+            fs.integrate(g, ancTime / 2 / ancNe, gamma = - 2 * ancNe * focal_s, h = 1/2, adapt_dt=True)
         
         return fs, ancNe
     else:
-        demo = demes.load(g)
-        if demo.time_units != "generations":
-            demo = demo.in_generations()
-        # demesdraw.tubes(demo);
+        # TODO need to deal with selected focal site and demes graph
+        if g.time_units != "generations":
+            g = g.in_generations()
+        # demesdraw.tubes(g);
         
-        totalgen, censusSize = getOldestEpoch(demo)
+        totalgen, censusSize = getOldestEpoch(g)
         totalT = totalgen / 2 / censusSize
         f, ancTime, ancNe = get_scaling_fun(positions, u, ss, ps, r, focalPos, censusSize, totalT, tol)    
        
         fs = SFS_bgs(
-           demo,
+           g,
            sampled_demes=sampled_demes,
            sample_sizes=sample_size,
            theta = 1,
@@ -849,10 +998,419 @@ def bgs_wrapper(u,
         
         return fs, ancNe
 
+#########################
+# OOA three populations #
+#########################
+
+# hardcoding some parameters
+u = 1e-8
+r = 1e-8
+L = 1e6
+focalPos = 5e5
+sample_size = 40
+sampled_demes = ["CEU"]
+
+fig, ax = plt.subplots(3, 1, figsize=(16, 8), sharex=True, sharey=False)
+fig.text(0.5, 0.04, 'Allele Frequency', ha='center')
+fig.text(0.04, 0.5, 'Count', va='center', rotation='vertical')
+fig.subplots_adjust(hspace = .25)
+for i in range(3):
+    for j in range(1):
+        curs = [1e-3, 5e-3, 1e-2][i]
+        curdemo = ["ooa.yaml"][j]
+        
+        os.chdir("/media/nathan/T7/BGSdemo/parsedooaThreepopData")
+
+        simData = pd.read_csv(str(curs) + "_" + str(curdemo) + ".csv", header = None)
+        simData = simData[0].to_numpy()
+        simData = moments.Spectrum(simData,data_folded=False) 
+        projData = simData.project([sample_size])
+        
+        os.chdir("/home/nathan/Documents/GitHub/BGSdemo/validation/fwdpy/DemographicSims/ooa/threepop")
+
+        # test
+        demo = demes.load(curdemo)
+        if demo.time_units != "generations":
+            demo = demo.in_generations()
+        # demesdraw.tubes(demo);
+        
+
+        fs, ancNe = bgs_wrapper(u = u,
+                                r = r,
+                                focalPos = focalPos,
+                                sample_size = [sample_size],
+                                ss = [curs],
+                                L = L,
+                                sampled_demes=sampled_demes,
+                                g = demo) 
+        
+        fs_neu = moments.Spectrum.from_demes(
+            curdemo, 
+            sampled_demes=sampled_demes, 
+            sample_sizes=[sample_size]
+        )
+
+        oldestEpoch, ancCensusSize = getOldestEpoch(demo)
+        fs = fs * 8 * 1e-8 * ancNe
+        projData = projData * 1e-8
+        fs_neu = fs_neu * 8 * 1e-8 * ancCensusSize   
+        
+        ax[i].plot(fs, ".-", ms=8, lw=1, label="BGS")
+        ax[i].plot(projData, "x-", ms=8, lw=1, label="fwdpy")
+        ax[i].plot(fs_neu, "+-", ms=8, lw=1, label="neutral")
+        ax[i].set_title("s = " + str(curs) + ", demo = " + curdemo)
+        ax[i].set_yscale('log')
+        if np.logical_and(i == 2, j == 0):
+            ax[i].legend();
+
+#######################
+# OOA two populations #
+#######################
+
+u = 1e-8
+r = 1e-8
+L = 1e6
+focalPos = 5e5
+sample_size = 40
+sampled_demes = ["OOA"]
+
+fig, ax = plt.subplots(3, 1, figsize=(16, 8), sharex=True, sharey=False)
+fig.text(0.5, 0.04, 'Allele Frequency', ha='center')
+fig.text(0.04, 0.5, 'Count', va='center', rotation='vertical')
+fig.subplots_adjust(hspace = .25)
+
+for i in range(3):
+    for j in range(1):
+        curs = [1e-3, 5e-3, 1e-2][i]
+        curdemo = ["ooaTwoPop.yaml"][j]
+        
+        os.chdir("/media/nathan/T7/BGSdemo/parsedooaTwoPopData")
+
+        simData = pd.read_csv(str(curs) + "_" + str(curdemo) + ".csv", header = None)
+        simData = simData[0].to_numpy()
+        simData = moments.Spectrum(simData,data_folded=False) 
+        projData = simData.project([sample_size])
+        
+        os.chdir("/home/nathan/Documents/GitHub/BGSdemo/validation/fwdpy/DemographicSims/ooa/twopop")
+
+        # test
+        demo = demes.load(curdemo)
+        if demo.time_units != "generations":
+            demo = demo.in_generations()
+        # demesdraw.tubes(demo);
+        
+        fs, ancNe = bgs_wrapper(u = u,
+                                       r = r,
+                                       focalPos = focalPos,
+                                       sample_size = [sample_size],
+                                       ss = [curs],
+                                       L = L,
+                                       sampled_demes=sampled_demes,
+                                       g = demo) 
+        
+        fs_neu = moments.Spectrum.from_demes(
+            curdemo, 
+            sampled_demes=["OOA"], 
+            sample_sizes=[sample_size]
+        )
+        
+        oldestEpoch, ancCensusSize = getOldestEpoch(demo)
+        fs = fs * 8 * 1e-8 * ancNe
+        projData = projData * 1e-8
+        fs_neu = fs_neu * 8 * 1e-8 * ancCensusSize   
+        
+        ax[i].plot(fs, ".-", ms=8, lw=1, label="BGS")
+        ax[i].plot(projData, "x-", ms=8, lw=1, label="fwdpy")
+        ax[i].plot(fs_neu, "+-", ms=8, lw=1, label="neutral")
+        ax[i].set_title("s = " + str(curs) + ", demo = " + curdemo)
+        ax[i].set_yscale('log')
+        if np.logical_and(i == 2, j == 0):
+            ax[i].legend();
+
+jdata = parseJointData()
+sampled_demes = ["OOA", "YRI"]
+fig, ax = plt.subplots(3, 1, figsize=(16, 8), sharex=True, sharey=False)
+fig.text(0.5, 0.04, 'Allele Frequency', ha='center')
+fig.text(0.04, 0.5, 'Count', va='center', rotation='vertical')
+fig.subplots_adjust(hspace = .25)
+
+for i in range(3):
+    for j in range(1):
+        curs = [1e-3, 5e-3, 1e-2][i]
+        curdemo = ["ooaTwoPop.yaml"][j]
+        
+        os.chdir("/media/nathan/T7/BGSdemo/ooaTwoPopData/joint")
+
+        # simData = pd.read_csv(str(curs) + "_" + str(curdemo) + ".csv", header = None)
+        # simData = simData[0].to_numpy()
+        # simData = moments.Spectrum(simData,data_folded=False) 
+        # projData = simData.project([proj_size])
+        
+        simData = jdata[i]
+        simData = moments.Spectrum(simData, data_folded = False)
+        projData = simData.project([sample_size, sample_size])
+        
+        os.chdir("/home/nathan/Documents/GitHub/BGSdemo/validation/fwdpy/DemographicSims/ooa/twopop")
+
+        # test
+        demo = demes.load(curdemo)
+        if demo.time_units != "generations":
+            demo = demo.in_generations()
+        # demesdraw.tubes(demo);
+        
+        fs, ancNe = bgs_wrapper(u = u,
+                                r = r,
+                                focalPos = focalPos,
+                                sample_size = [sample_size],
+                                ss = [curs],
+                                L = L,
+                                sampled_demes=sampled_demes,
+                                g = demo)
+
+        # normalizing so singletons have freq 1, cause thats all I can think of right now
+        fs = fs * 8 * 1e-8 * ancNe
+        projData = projData * 1e-8
+        # fs_neu = fs_neu * 8 * 1e-8 * censusSize   
+        # ds = ds * 8 * 1e-8 * censusSize
+        
+        # moments.Plotting.plot_single_2d_sfs(fs)
+        # moments.Plotting.plot_single_2d_sfs(projData)plot_3d_spectrum_mayavi
+        
+        moments.Plotting.plot_2d_comp_Poisson(fs, projData)
+
+#########################
+# OOA single population #
+#########################
+
+# hardcoding some parameters
+u = 1e-8
+r = 1e-8
+L = 1e6
+focalPos = 5e5
+sample_size = 40
+
+# for curs in [1e-3, 5e-3, 1e-2]:
+#     for curN in [1e3, 5e3, 1e4]:
+fig, ax = plt.subplots(3, 1, figsize=(16, 8), sharex=True, sharey=False)
+fig.text(0.5, 0.04, 'Allele Frequency', ha='center')
+fig.text(0.04, 0.5, 'Count', va='center', rotation='vertical')
+fig.subplots_adjust(hspace = .25)
+
+for i in range(3):
+    for j in range(1):
+        curs = [1e-3, 5e-3, 1e-2][i]
+        curdemo = ["ooaSinglePop.yaml"][j]
+        
+        os.chdir("/media/nathan/T7/BGSdemo/parsedooaSinglePopData")
+
+        simData = pd.read_csv(str(curs) + "_" + str(curdemo) + ".csv", header = None)
+        simData = simData[0].to_numpy()
+        simData = moments.Spectrum(simData,data_folded=False) 
+        projData = simData.project([sample_size])
+        
+        os.chdir("/home/nathan/Documents/GitHub/BGSdemo/validation/fwdpy/DemographicSims/ooa")
+
+        demo = demes.load(curdemo)
+        demo = demo.in_generations()
+        # demesdraw.tubes(demo);
+        
+        oldestEpoch, ancCensusSize = getOldestEpoch(demo)
+        ds = reversedCensusFun(demo, oldestEpoch, ancCensusSize) 
+        cs =  lambda t: [ds(t)[0] * ancCensusSize] 
+        
+        # fig, ax = plt.subplots(1, 1, figsize=(8, 4))
+        # ax.plot(np.arange(0,oldestEpoch / 2 / ancCensusSize, 0.001),[cs(t) for t in np.arange(0,oldestEpoch / 2 / ancCensusSize, 0.001)], "-", ms=8, lw=1, label="cs(t)")
+        # ax.set_xlabel("Time in past")
+        # ax.set_ylabel("cs(t)")
+        # ax.legend();   
+        
+        fs, ancNe = bgs_wrapper(u = u,
+                                r = r,
+                                focalPos = focalPos,
+                                sample_size = [sample_size],
+                                ss = [curs],
+                                L = L,
+                                cs = cs,
+                                totalT = oldestEpoch / 2 / ancCensusSize)
+        
+        fs_neu = moments.Demographics1D.snm([sample_size])
+        fs_neu.integrate(ds, oldestEpoch / 2 / ancCensusSize)
+        
+        sampled_demes = ["CEU"]
+
+        fs_demes = moments.Spectrum.from_demes(
+            curdemo, sampled_demes=sampled_demes, sample_sizes=[sample_size]
+        )
+        
+        bgs_demes, ancNe2 = bgs_wrapper(u = u,
+                                r = r,
+                                focalPos = focalPos,
+                                sample_size = [sample_size],
+                                ss = [curs],
+                                L = L,
+                                sampled_demes=sampled_demes,
+                                g = demo) 
+        
+
+        # normalizing so singletons have freq 1, cause thats all I can think of right now
+        fs = fs * 8 * 1e-8 * ancNe
+        projData = projData * 1e-8
+        fs_neu = fs_neu * 8 * 1e-8 * ancCensusSize   
+        fs_demes = fs_demes * 8 * 1e-8 * ancCensusSize
+        bgs_demes = bgs_demes * 8 * 1e-8 * ancNe2   
+        
+        ax[i].plot(fs, ".-", ms=8, lw=1, label="BGS")
+        ax[i].plot(projData, "x-", ms=8, lw=1, label="fwdpy")
+        ax[i].plot(fs_neu, "+-", ms=8, lw=1, label="neutral")
+        ax[i].plot(fs_demes, "*-", ms=8, lw=1, label="demes")
+        ax[i].plot(bgs_demes, "*-", ms=8, lw=1, label="bgs_demes")        
+        ax[i].set_title("s = " + str(curs) + ", demo = " + curdemo)
+        ax[i].set_yscale('log')
+        if np.logical_and(i == 2, j == 0):
+            ax[i].legend();
+            
+#################################
+# bottleneck neutral focal site #
+#################################
+
+# hardcoding some parameters
+u = 1e-8
+r = 1e-8
+L = 1e6
+focalPos = 5e5
+sample_size = 40
+
+fig, ax = plt.subplots(3, 2, figsize=(16, 8), sharex=True, sharey=False)
+fig.text(0.5, 0.04, 'Allele Frequency', ha='center')
+fig.text(0.04, 0.5, 'Count', va='center', rotation='vertical')
+fig.subplots_adjust(hspace = .25)
+for i in range(3):
+    for j in range(2):
+        curs = [1e-3, 5e-3, 1e-2][i]
+        curdemo = ["1k.yaml", "5k.yaml"][j]
+        
+        
+        os.chdir("/media/nathan/T7/BGSdemo/parsedbottleneckData")
+        
+        simData = pd.read_csv(str(curs) + "_" + str(curdemo) + ".csv", header = None)
+        simData = simData[0].to_numpy()
+        simData = moments.Spectrum(simData,data_folded=False) 
+        projData = simData.project([sample_size])
+        
+        os.chdir("/home/nathan/Documents/GitHub/BGSdemo/validation/fwdpy/DemographicSims")
+
+        demo = demes.load(curdemo)
+        # demesdraw.tubes(demo);
+        
+        oldestEpoch, ancCensusSize = getOldestEpoch(demo)
+        ds = reversedCensusFun(curdemo, oldestEpoch, ancCensusSize) 
+        cs =  lambda t: [ds(t)[0] * ancCensusSize] 
+        
+        fs, ancNe = bgs_wrapper(u = u,
+                                r = r,
+                                focalPos = focalPos,
+                                sample_size = [sample_size],
+                                ss = [curs],
+                                L = L,
+                                cs = cs,
+                                totalT = oldestEpoch / 2 / ancCensusSize)
+        
+        fs_neu = moments.Demographics1D.snm([sample_size])
+        fs_neu.integrate(ds, oldestEpoch / 2 / ancCensusSize)
+        
+        sampled_demes = ["B"]
+
+        fs_demes = moments.Spectrum.from_demes(
+            curdemo, sampled_demes=sampled_demes, sample_sizes=[sample_size]
+        )
+        
+        bgs_demes, ancNe2 = bgs_wrapper(u = u,
+                                r = r,
+                                focalPos = focalPos,
+                                sample_size = [sample_size],
+                                ss = [curs],
+                                L = L,
+                                sampled_demes=sampled_demes,
+                                g = demo) 
+        
+
+        # normalizing so singletons have freq 1, cause thats all I can think of right now
+        fs = fs * 8 * 1e-8 * ancNe
+        projData = projData * 1e-8
+        fs_neu = fs_neu * 8 * 1e-8 * ancCensusSize   
+        fs_demes = fs_demes * 8 * 1e-8 * ancCensusSize
+        bgs_demes = bgs_demes * 8 * 1e-8 * ancNe2
+        
+        ax[i,j].plot(fs, ".-", ms=8, lw=1, label="BGS")
+        ax[i,j].plot(projData, "x-", ms=8, lw=1, label="fwdpy")
+        ax[i,j].plot(fs_neu, "+-", ms=8, lw=1, label="neutral")
+        ax[i,j].plot(fs_demes, "*-", ms=8, lw=1, label="demes")
+        ax[i,j].plot(bgs_demes, "*-", ms=8, lw=1, label="bgs_demes")
+        ax[i,j].set_title("s = " + str(curs) + ", demo = " + curdemo)
+        ax[i,j].set_yscale('log')
+        if np.logical_and(i == 2, j == 1):
+            ax[i,j].legend();
+            
 ###################################
 # equilibrium selected focal site #
 ###################################
 
+os.chdir("/media/nathan/T7/BGSdemo/parsedMoreSelData")
+
+# hardcoding some parameters
+u = 1e-8
+r = 1e-8
+L = 1e6
+focalPos = 5e5
+sample_size = 500
+proj_size = 40
+
+curwi = "wi5e4.csv"
+
+fig, ax = plt.subplots(3, 3, figsize=(16, 8), sharex=True, sharey=False)
+fig.text(0.5, 0.04, 'Allele Frequency', ha='center')
+fig.text(0.04, 0.5, 'Count', va='center', rotation='vertical')
+fig.text(0.5, 0.96, curwi, ha='center')
+fig.subplots_adjust(hspace = .25)
+for i in range(3):
+    for j in range(3):
+        curs = [1e-3, 5e-3, 1e-2][i]
+        curN = [1e3, 5e3, 1e4][j]
+        simData = pd.read_csv(str(curs) + "_" + str(int(curN)) + "_" + curwi + ".csv", header = None)
+        simData = simData[0].to_numpy()
+        simData = moments.Spectrum(simData,data_folded=False) / 11 / 1000
+        projData = simData.project([proj_size])
+        
+        fs, ancNe = bgs_wrapper(u = u,
+                                r = r,
+                                focalPos = focalPos,
+                                sample_size = [sample_size],
+                                ss = [curs],
+                                L = L,
+                                cs = [curN],
+                                focal_s = curs)
+        
+        fs_indep = moments.Spectrum(moments.LinearSystem_1D.steady_state_1D(sample_size, gamma = - 2 * curN * curs))
+
+        if curwi == "wi5e4.csv":
+            fs = fs *  4 * 2 * 5e4 * 1e-8 * ancNe
+            fs_indep = fs_indep * 4 * 2 * 5e4 * 1e-8 * curN
+            projData = projData 
+        if curwi == "wi1e5.csv":
+            fs = fs *  4 * 2 * 1e5 * 1e-8 * ancNe
+            fs_indep = fs_indep * 4 * 2 * 1e5 * 1e-8 * curN
+            projData = projData 
+        
+        fs = fs.project([proj_size])
+        fs_indep = fs_indep.project([proj_size])
+        
+        ax[i,j].plot(fs[0:21], ".-", ms=8, lw=1, label="BGS")
+        ax[i,j].plot(projData[0:21], "x-", ms=8, lw=1, label="fwdpy")
+        ax[i,j].plot(fs_indep[0:21], "+-", ms=8, lw=1, label="single locus")
+        ax[i,j].set_title("s = " + str(curs) + ", N = " + str(int(curN)))
+        ax[i,j].set_yscale('log')
+        if np.logical_and(i == 2, j == 2):
+            ax[i,j].legend();
 
 ###################
 # equilibrium dfe #
