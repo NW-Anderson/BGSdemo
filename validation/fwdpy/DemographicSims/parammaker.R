@@ -58,3 +58,22 @@ for(s in c(1e-3,5e-3,1e-2)){
 master$seed <- sample(1:1e5,nrow(master))
 write.table(master, file = "ooa.txt",
             row.names = F,col.names = F, quote=F)
+
+library(dplyr)
+master <- data.frame()
+for(s in c(1e-3,
+           5e-4,
+           1e-4,
+           5e-5,
+           1e-5)){
+  for(demo in c("ooa.yaml")){
+    for(rep in 1:1000){
+      master <- dplyr::bind_rows(master,
+                                 data.frame(s,
+                                            demo))
+    }
+  }
+}
+master$seed <- sample(1:1e6,nrow(master))
+write.table(master, file = "ooa.txt",
+            row.names = F,col.names = F, quote=F)
