@@ -971,6 +971,8 @@ minPos = 0
 r_cumulative = None
 focal_s = 1e-3
 
+# todo make theta != 1 support
+
 #############################
 ######## integrated #########
 #############################

@@ -380,6 +380,10 @@ def runsim(args):
     rec_regions = make_rec_regions(recMap)
     sel_regions,U = make_sel_regions(mutMap, exonMap, mean, scaling)
     
+    # // m1 mutation type: gamma
+    # // note: some rescaling is done since we use 1,1+2sh,1+s and SLiM uses 1,1+hs,1+s
+    # initializeMutationType("m1", 0.5, "g", -0.00657402090856, 0.186); 1,1+hs,1+s
+    
     # here
 
     demography = fwdpy11.ForwardDemesGraph.from_demes(graph, 20, burnin_is_exact=False)
