@@ -9,6 +9,7 @@ import demes
 import demesdraw
 import copy
 from scipy import interpolate
+import warnings
 
 os.chdir('/home/nathan/Documents/GitHub/BGSdemo/validation/fwdpy')
 from deme_funs import _get_demographic_events, _get_deme_sample_sizes, _get_root_Ne, _sizes_at_time, _migration_rate_in_interval, _compute_sfs, _reorder_fs
@@ -404,7 +405,7 @@ def test_inputs(u,
             raise ValueError('There is positive mutation rate at locations greater than the provided L')
     if type(r) is list: 
         if np.shape(r)[1] != 3 or np.shape(r) != 2:
-            raise ValueError("If r is list it must be of the form [[start, stop, r per bp if r_cumulative = False or [pos, R cumulative] if r_cumulative = True]]") #TODO need to make function for cumulative map
+            raise ValueError("If r is list it must be of the form [[start, stop, r per bp if r_cumulative = False or [pos, R cumulative] if r_cumulative = True]]") # TODO  make function for user provided cumulative maps
         diffs = []
         i = 0
         while i < len(r) - 1:
@@ -924,6 +925,45 @@ def _make_nu_func_bgs(sizes, T, Ne, T_elapsed, scaling_fun):
         # check that this is correct, or if we have to "pin" parameters
     return nu_func
 
+# TODO test
+def rescale_cs(cs, totalT, ancTime, ancNe, censusSize): # todo rename with rescale_time ? 
+    if totalT * 2 * censusSize == ancTime:
+        return lambda t: [cs(t / censusSize * ancNe)[0] / censusSize] 
+    elif totalT * 2 * censusSize < ancTime:
+        # time to add before demographic event
+        buffer = ancTime - 2 * censusSize * totalT
+        def ds(t):
+            # convert time to generations
+            gen = t * 2 * ancNe
+            # if input time is before the start of demography
+            if gen <= buffer:
+                tt = 0
+            else: 
+                tt = (gen - buffer) / 2 / censusSize
+            return [cs(tt)[0] / censusSize]
+        return ds
+    else: 
+        raise ValueError("ancTime < totalT provided. This should never happen") # TODO make better warning.
+
+# ds = reversedCensusFun(demo, oldestEpoch, ancCensusSize) 
+# cs =  lambda t: [ds(t)[0] * ancCensusSize] 
+
+def reversedCensusFun(demo, ancTime, ancNe):
+    tmp_fun = censusFun(demo)
+    denom = tmp_fun(ancTime)[0]
+
+    def ds(t):
+        # map coalescent time t (in units of ancNe) back to demes time
+        tt = ancTime - t * 2 * ancNe
+        # clamp into [0, ancTime]
+        if tt < 0:
+            tt = 0.0
+            # print("overshoot:", t, "tt:", tt)
+        elif tt > ancTime:
+            tt = ancTime
+        return [x / denom for x in tmp_fun(tt) if x is not None]
+    return ds
+    
 # human maps
 os.chdir("/home/nathan/Documents/GitHub/BGSdemo/validation/fwdpy/EquilibriumSims/humanMaps")
 recName = "YRI_recombination_map_hg38_chr_22.bed"
@@ -939,43 +979,74 @@ mutMap = simplify_rate_map(mutMap)
 exonMutMap, U = make_exon_only_mutmap(mutMap, exonMap) 
 
 # hardcoding some parameters
-# u = 1e-8
-u = exonMutMap
-# r = 1e-8
-r = recMap
-# L = 1e6
-L = None
-# focalPos = 5e5
-focalPos = r[-1][1] / 2
-sample_size = [400]
+u = 1e-8
+# u = exonMutMap
+r = 1e-8
+# r = recMap
+L = 1e6
+# L = None
+focalPos = 5e5
+# focalPos = r[-1][1] / 2
+sample_size = [40]
 ss = [1e-2]
 # ss = [1e-2, 5e-3]
 
-# cs = lambda t: [1e3 + 2 * 1e3 * t]
+cs = lambda t: [1e3 + 2 * 1e3 * t]
 # cs = [1e3]
+totalT = 0.1
 # totalT = 1
 # totalT = 0
-cs = None
-totalT = None
+# cs = None
+# totalT = None
 
 os.chdir("/home/nathan/Documents/GitHub/BGSdemo/validation/fwdpy/DemographicSims/ooa/threepop")
 
 # g = None
 # sampled_demes = None
-g = demes.load('ooa.yaml')
-sampled_demes = ["CEU"]
+# g = demes.load('ooa.yaml')
+# sampled_demes = ["CEU"]
 ps = None
 targetSize = 1e4
 tol = 1e-4
 minPos = 0
 r_cumulative = None
-focal_s = 1e-3
+# focal_s = 1e-3
+focal_s = None
 
 # todo make theta != 1 support
 
 #############################
 ######## integrated #########
 #############################
+
+fig, ax = plt.subplots(1, 1, figsize=(8, 4))
+ax.plot(np.arange(0,ancTime / 2 / ancNe, 0.001),[g(t) for t in np.arange(0,ancTime / 2 / ancNe, 0.001)], "-", ms=8, lw=1, label="g(t)")
+ax.set_xlabel("Time in past")
+ax.set_ylabel("g(t)")
+ax.legend(); 
+     
+fig, ax = plt.subplots(1, 1, figsize=(8, 4))
+ax.plot(np.arange(0,ancTime / 2 / ancNe, 0.001),[rescaledcs(t) for t in np.arange(0,ancTime / 2 / ancNe, 0.001)], "-", ms=8, lw=1, label="rescaledcs(t)")
+ax.set_xlabel("Time in past")
+ax.set_ylabel("rescaledcs(t)")
+ax.legend();     
+
+fig, ax = plt.subplots(1, 1, figsize=(8, 4))
+ax.plot(np.arange(0,totalT, 0.001),[cs(t) for t in np.arange(0,totalT, 0.001)], "-", ms=8, lw=1, label="cs(t)")
+ax.set_xlabel("Time in past")
+ax.set_ylabel("cs(t)")
+ax.legend();   
+
+[cs(0),rescaledcs(0)]
+
+[cs(totalT), rescaledcs(ancTime / 2/ ancNe)]
+
+fig, ax = plt.subplots(1, 1, figsize=(8, 4))
+ax.plot(np.arange(0,ancTime / 2 / ancNe, 0.001),[f(t) for t in np.arange(0,ancTime / 2 / ancNe, 0.001)], "-", ms=8, lw=1, label="f(t)")
+ax.set_xlabel("Time in past")
+ax.set_ylabel("f(t)")
+ax.legend();     
+
 def bgs_wrapper(u,
                 r,
                 focalPos,
@@ -993,7 +1064,7 @@ def bgs_wrapper(u,
                 focal_s = None,
                 r_cumulative = None
                 ):
-    if L is None: 
+    if L is None: # todo problem if L is none and u and r are floats
         if type(u) is list:
             L = u[-1][1]
             minPos = u[0][0]
@@ -1017,13 +1088,13 @@ def bgs_wrapper(u,
         r = [[minPos,L,r]]
         r = make_cum_map(r)
     else:
-        if min(rate_diff(r)) < 0:
+        if min(rate_diff(r)) < 0: # TODO fix this for user provided cumulative maps
             if r_cumulative is None or r_cumulative is False:
                 r = make_cum_map(r)
         
     
     if cs is not None:
-        if type(cs) is list: 
+        if type(cs) is list:  # todo need to make sure cs is only length one
             censusSize = cs[0]
             cs = lambda t: [censusSize]
             totalT = 0
@@ -1044,7 +1115,6 @@ def bgs_wrapper(u,
         
         return fs, ancNe
     else:
-        # TODO need to deal with selected focal site and demes graph
         if g.time_units != "generations":
             g = g.in_generations()
         # demesdraw.tubes(g);
@@ -1257,92 +1327,92 @@ def bgs_wrapper(u,
 # # OOA single population #
 # #########################
 
-# # hardcoding some parameters
-# u = 1e-8
-# r = 1e-8
-# L = 1e6
-# focalPos = 5e5
-# sample_size = 40
+# hardcoding some parameters
+u = 1e-8
+r = 1e-8
+L = 1e6
+focalPos = 5e5
+sample_size = 40
 
-# # for curs in [1e-3, 5e-3, 1e-2]:
-# #     for curN in [1e3, 5e3, 1e4]:
-# fig, ax = plt.subplots(3, 1, figsize=(16, 8), sharex=True, sharey=False)
-# fig.text(0.5, 0.04, 'Allele Frequency', ha='center')
-# fig.text(0.04, 0.5, 'Count', va='center', rotation='vertical')
-# fig.subplots_adjust(hspace = .25)
+# for curs in [1e-3, 5e-3, 1e-2]:
+#     for curN in [1e3, 5e3, 1e4]:
+fig, ax = plt.subplots(3, 1, figsize=(16, 8), sharex=True, sharey=False)
+fig.text(0.5, 0.04, 'Allele Frequency', ha='center')
+fig.text(0.04, 0.5, 'Count', va='center', rotation='vertical')
+fig.subplots_adjust(hspace = .25)
 
-# for i in range(3):
-#     for j in range(1):
-#         curs = [1e-3, 5e-3, 1e-2][i]
-#         curdemo = ["ooaSinglePop.yaml"][j]
+for i in range(3):
+    for j in range(1):
+        curs = [1e-3, 5e-3, 1e-2][i]
+        curdemo = ["ooaSinglePop.yaml"][j]
         
-#         os.chdir("/media/nathan/T7/BGSdemo/parsedooaSinglePopData")
+        os.chdir("/media/nathan/T7/BGSdemo/parsedooaSinglePopData")
 
-#         simData = pd.read_csv(str(curs) + "_" + str(curdemo) + ".csv", header = None)
-#         simData = simData[0].to_numpy()
-#         simData = moments.Spectrum(simData,data_folded=False) 
-#         projData = simData.project([sample_size])
+        simData = pd.read_csv(str(curs) + "_" + str(curdemo) + ".csv", header = None)
+        simData = simData[0].to_numpy()
+        simData = moments.Spectrum(simData,data_folded=False) 
+        projData = simData.project([sample_size])
         
-#         os.chdir("/home/nathan/Documents/GitHub/BGSdemo/validation/fwdpy/DemographicSims/ooa")
+        os.chdir("/home/nathan/Documents/GitHub/BGSdemo/validation/fwdpy/DemographicSims/ooa")
 
-#         demo = demes.load(curdemo)
-#         demo = demo.in_generations()
-#         # demesdraw.tubes(demo);
+        demo = demes.load(curdemo)
+        demo = demo.in_generations()
+        # demesdraw.tubes(demo);
         
-#         oldestEpoch, ancCensusSize = getOldestEpoch(demo)
-#         ds = reversedCensusFun(demo, oldestEpoch, ancCensusSize) 
-#         cs =  lambda t: [ds(t)[0] * ancCensusSize] 
+        oldestEpoch, ancCensusSize = getOldestEpoch(demo)
+        ds = reversedCensusFun(demo, oldestEpoch, ancCensusSize) 
+        cs =  lambda t: [ds(t)[0] * ancCensusSize] 
         
-#         # fig, ax = plt.subplots(1, 1, figsize=(8, 4))
-#         # ax.plot(np.arange(0,oldestEpoch / 2 / ancCensusSize, 0.001),[cs(t) for t in np.arange(0,oldestEpoch / 2 / ancCensusSize, 0.001)], "-", ms=8, lw=1, label="cs(t)")
-#         # ax.set_xlabel("Time in past")
-#         # ax.set_ylabel("cs(t)")
-#         # ax.legend();   
+        # fig, ax = plt.subplots(1, 1, figsize=(8, 4))
+        # ax.plot(np.arange(0,oldestEpoch / 2 / ancCensusSize, 0.001),[cs(t) for t in np.arange(0,oldestEpoch / 2 / ancCensusSize, 0.001)], "-", ms=8, lw=1, label="cs(t)")
+        # ax.set_xlabel("Time in past")
+        # ax.set_ylabel("cs(t)")
+        # ax.legend();   
         
-#         fs, ancNe = bgs_wrapper(u = u,
-#                                 r = r,
-#                                 focalPos = focalPos,
-#                                 sample_size = [sample_size],
-#                                 ss = [curs],
-#                                 L = L,
-#                                 cs = cs,
-#                                 totalT = oldestEpoch / 2 / ancCensusSize)
+        fs, ancNe = bgs_wrapper(u = u,
+                                r = r,
+                                focalPos = focalPos,
+                                sample_size = [sample_size],
+                                ss = [curs],
+                                L = L,
+                                cs = cs,
+                                totalT = oldestEpoch / 2 / ancCensusSize)
         
-#         fs_neu = moments.Demographics1D.snm([sample_size])
-#         fs_neu.integrate(ds, oldestEpoch / 2 / ancCensusSize)
+        fs_neu = moments.Demographics1D.snm([sample_size])
+        fs_neu.integrate(ds, oldestEpoch / 2 / ancCensusSize)
         
-#         sampled_demes = ["CEU"]
+        sampled_demes = ["CEU"]
 
-#         fs_demes = moments.Spectrum.from_demes(
-#             curdemo, sampled_demes=sampled_demes, sample_sizes=[sample_size]
-#         )
+        fs_demes = moments.Spectrum.from_demes(
+            curdemo, sampled_demes=sampled_demes, sample_sizes=[sample_size]
+        )
         
-#         bgs_demes, ancNe2 = bgs_wrapper(u = u,
-#                                 r = r,
-#                                 focalPos = focalPos,
-#                                 sample_size = [sample_size],
-#                                 ss = [curs],
-#                                 L = L,
-#                                 sampled_demes=sampled_demes,
-#                                 g = demo) 
+        bgs_demes, ancNe2 = bgs_wrapper(u = u,
+                                r = r,
+                                focalPos = focalPos,
+                                sample_size = [sample_size],
+                                ss = [curs],
+                                L = L,
+                                sampled_demes=sampled_demes,
+                                g = demo) 
         
 
-#         # normalizing so singletons have freq 1, cause thats all I can think of right now
-#         fs = fs * 8 * 1e-8 * ancNe
-#         projData = projData * 1e-8
-#         fs_neu = fs_neu * 8 * 1e-8 * ancCensusSize   
-#         fs_demes = fs_demes * 8 * 1e-8 * ancCensusSize
-#         bgs_demes = bgs_demes * 8 * 1e-8 * ancNe2   
+        # normalizing so singletons have freq 1, cause thats all I can think of right now
+        fs = fs * 8 * 1e-8 * ancNe
+        projData = projData * 1e-8
+        fs_neu = fs_neu * 8 * 1e-8 * ancCensusSize   
+        fs_demes = fs_demes * 8 * 1e-8 * ancCensusSize
+        bgs_demes = bgs_demes * 8 * 1e-8 * ancNe2   
         
-#         ax[i].plot(fs, ".-", ms=8, lw=1, label="BGS")
-#         ax[i].plot(projData, "x-", ms=8, lw=1, label="fwdpy")
-#         ax[i].plot(fs_neu, "+-", ms=8, lw=1, label="neutral")
-#         ax[i].plot(fs_demes, "*-", ms=8, lw=1, label="demes")
-#         ax[i].plot(bgs_demes, "*-", ms=8, lw=1, label="bgs_demes")        
-#         ax[i].set_title("s = " + str(curs) + ", demo = " + curdemo)
-#         ax[i].set_yscale('log')
-#         if np.logical_and(i == 2, j == 0):
-#             ax[i].legend();
+        ax[i].plot(fs, ".-", ms=8, lw=1, label="BGS")
+        ax[i].plot(projData, "x-", ms=8, lw=1, label="fwdpy")
+        ax[i].plot(fs_neu, "+-", ms=8, lw=1, label="neutral")
+        ax[i].plot(fs_demes, "*-", ms=8, lw=1, label="demes")
+        ax[i].plot(bgs_demes, "*-", ms=8, lw=1, label="bgs_demes")        
+        ax[i].set_title("s = " + str(curs) + ", demo = " + curdemo)
+        ax[i].set_yscale('log')
+        if np.logical_and(i == 2, j == 0):
+            ax[i].legend();
             
 #################################
 # bottleneck neutral focal site #
@@ -1554,7 +1624,6 @@ exonMap = read_exon_map(exonName)
 recMap = simplify_rate_map(recMap)
 mutMap = simplify_rate_map(mutMap)
 
-# todo what if a region is too large
 exonMutMap, U = make_exon_only_mutmap(mutMap, exonMap) 
 
 os.chdir("/media/nathan/T7/BGSdemo/parsedequilHuman5027")
@@ -1637,9 +1706,6 @@ for i in range(3):
 #         fs = fs * 8 * 1e-8 * ancNe
 #         projData = projData * 1e-8
 #         fs_neu = fs_neu * 8 * 1e-8 * curN
-        
-#         # todo i think the correct thing is tp divide the previous lines by 2
-#         # regular theta for a single site and span normalized projData
         
 #         ax[i,j].plot(fs, ".-", ms=8, lw=1, label="BGS")
 #         ax[i,j].plot(projData, "x-", ms=8, lw=1, label="fwdpy")
