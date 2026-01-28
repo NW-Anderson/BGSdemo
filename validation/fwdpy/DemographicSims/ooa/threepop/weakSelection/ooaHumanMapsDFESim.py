@@ -462,7 +462,7 @@ if __name__ == "__main__":
     
     midAfs = afs[1::2]
 
-    np.save("ceuData_" + str(seed) + ".npy", midAfs)
+    # np.save("ceuData_" + str(seed) + ".npy", midAfs)
     np.savetxt(str(seed) + "_ceu.csv", midAfs, delimiter = ",")
     
     import random

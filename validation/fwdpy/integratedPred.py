@@ -27,7 +27,7 @@ def make_cum_map(r):
     return interpolate.interp1d(pos, cum)
 
 def rate_diff(thing):
-    rates = [x[2] for x in thing]
+    rates = [x[-1] for x in thing]
     return np.diff(rates)
     
 def unique(thing):
@@ -356,80 +356,7 @@ def get_scaling_fun(positions, u, ss, ps, r, focalPos, censusSize, totalT, tol):
     ancB = B(scaledu, ss, ps, ancTime, recDist)
     ancNe = ancB * censusSize
     return(lambda t: [math.exp(sum([p * rescaledPointMassContribution(u, s, t, r, ancNe, ancTime) for u,r in zip(scaledu, recDist) for p,s in zip(ps, ss)])) / ancB], ancTime, ancNe)
-
-# u,
-# r,
-# focalPos,
-# sample_size,
-# ss,
-# cs = None,
-# g = None,
-# sampled_demes = None,
-# totalT = None,
-# L = None,
-# ps = None,
-# targetSize = 1e4,
-# tol = 1e-4,
-# minPos = 0,
-# focal_s = None,
-# r_cumulative = None
-def test_inputs(u,
-                r,
-                focalPos,
-                sample_size,
-                ss,
-                cs,
-                g,
-                sampled_demes,
-                totalT,
-                L,
-                ps,
-                targetSize,
-                tol,
-                minPos,
-                focal_s,
-                r_cumulative): # TODO finish
-    if type(u) is not list and type(r) is not list and L is None:
-            raise ValueError("If u and r are constant than the chrom. size, L, must be specified.")
-    if type(u) is list: 
-        if np.shape(u)[1] != 3:
-            raise ValueError("If u is list it must be of the form [[start, stop, mu per bp]]")
-        diffs = []
-        i = 0
-        while i < len(u) - 1:
-            i += 1
-            diffs.append(u[i][0] - u[i-1][1])
-        if any([x < 0 for x in diffs]):
-            raise ValueError("List u must be in increasing order by position and not overlap: u[i][0] >= u[i-1][1]")   
-        if L is not None:
-            raise ValueError('There is positive mutation rate at locations greater than the provided L')
-    if type(r) is list: 
-        if np.shape(r)[1] != 3 or np.shape(r) != 2:
-            raise ValueError("If r is list it must be of the form [[start, stop, r per bp if r_cumulative = False or [pos, R cumulative] if r_cumulative = True]]") # TODO  make function for user provided cumulative maps
-        diffs = []
-        i = 0
-        while i < len(r) - 1:
-            i += 1
-            diffs.append(r[i][0] - r[i-1][1])
-        if any([x != 0 for x in diffs]): 
-            raise ValueError("List r must be in increasing order by position with no gaps and no overlap: r[i][0] == r[i-1][1]")   
-    if L is not None and type(r) is list:
-        if r[-1][1] != L:
-            raise ValueError("Final position or r does not match the provided L. r must span the entire chromosome")
-    if type(r) is list and type(u) is list:
-        if r[-1][1] < u[1][1]:
-            raise ValueError("Final position or u is greater than r. r must span the entire chromosome")
-    if type(focalPos) is not float and type(focalPos) is not int:
-        raise ValueError("focalPos must be float or int")
-    if sample_size is not list or len(sample_size) != len(sampled_demes):
-        raise ValueError("sample size must be a list of values for each sampled_deme") # 
-    if ss is not list:
-        raise ValueError("ss must a list of selection coefficients")
-    if ps is not list:
-        raise ValueError("ps must be a list of the same length as ss")
-    
-    # TODO test samplesize, l, target size, and tol, ss, ps, cs, g, totalT
-    
+  
 def getOldestEpoch(graph):
     tme = 0
     for deme in graph.demes:
@@ -717,7 +644,7 @@ def SFS_bgs(
         if isinstance(u, (int, float)):
             theta = 4 * Ne * u * L
         else:
-            if np.ndim(u) != 1 or len(u) != 2:
+            if np.ndim(u) != 1 or len(u) != 2: # TODO ndim instead of len(np.shape)
                 raise ValueError(
                     "Mutation rates must be a list of length 2 when using "
                     "the reversible mutation model"
@@ -925,8 +852,7 @@ def _make_nu_func_bgs(sizes, T, Ne, T_elapsed, scaling_fun):
         # check that this is correct, or if we have to "pin" parameters
     return nu_func
 
-# TODO test
-def rescale_cs(cs, totalT, ancTime, ancNe, censusSize): # todo rename with rescale_time ? 
+def rescale_cs(cs, totalT, ancTime, ancNe, censusSize): 
     if totalT * 2 * censusSize == ancTime:
         return lambda t: [cs(t / censusSize * ancNe)[0] / censusSize] 
     elif totalT * 2 * censusSize < ancTime:
@@ -944,25 +870,6 @@ def rescale_cs(cs, totalT, ancTime, ancNe, censusSize): # todo rename with resca
         return ds
     else: 
         raise ValueError("ancTime < totalT provided. This should never happen") # TODO make better warning.
-
-# ds = reversedCensusFun(demo, oldestEpoch, ancCensusSize) 
-# cs =  lambda t: [ds(t)[0] * ancCensusSize] 
-
-def reversedCensusFun(demo, ancTime, ancNe):
-    tmp_fun = censusFun(demo)
-    denom = tmp_fun(ancTime)[0]
-
-    def ds(t):
-        # map coalescent time t (in units of ancNe) back to demes time
-        tt = ancTime - t * 2 * ancNe
-        # clamp into [0, ancTime]
-        if tt < 0:
-            tt = 0.0
-            # print("overshoot:", t, "tt:", tt)
-        elif tt > ancTime:
-            tt = ancTime
-        return [x / denom for x in tmp_fun(tt) if x is not None]
-    return ds
     
 # human maps
 os.chdir("/home/nathan/Documents/GitHub/BGSdemo/validation/fwdpy/EquilibriumSims/humanMaps")
@@ -981,21 +888,29 @@ exonMutMap, U = make_exon_only_mutmap(mutMap, exonMap)
 # hardcoding some parameters
 u = 1e-8
 # u = exonMutMap
-r = 1e-8
-# r = recMap
-L = 1e6
-# L = None
-focalPos = 5e5
+# r = 1e-8
+r = recMap
+cum = np.cumsum([(y-x)*z for x,y,z in r])
+pos = [y for x,y,z in r]
+
+cum = np.insert(cum,0,0)
+pos = np.insert(pos, 0, r[0][0])
+
+r = [[x,y] for x,y in zip(pos,cum)]
+
+# L = 1e6
+L = None
+# focalPos = 5e5
 # focalPos = r[-1][1] / 2
 sample_size = [40]
 ss = [1e-2]
 # ss = [1e-2, 5e-3]
 
-cs = lambda t: [1e3 + 2 * 1e3 * t]
-# cs = [1e3]
-totalT = 0.1
+# cs = lambda t: [1e3 + 2 * 1e3 * t]
+cs = [1e3]
+# totalT = 0.1
 # totalT = 1
-# totalT = 0
+totalT = 0
 # cs = None
 # totalT = None
 
@@ -1009,11 +924,10 @@ ps = None
 targetSize = 1e4
 tol = 1e-4
 minPos = 0
-r_cumulative = None
 # focal_s = 1e-3
 focal_s = None
 
-# todo make theta != 1 support
+# todo make theta != 1 support is that just setting theta != 1???
 
 #############################
 ######## integrated #########
@@ -1021,8 +935,10 @@ focal_s = None
 
 fig, ax = plt.subplots(1, 1, figsize=(8, 4))
 ax.plot(np.arange(0,ancTime / 2 / ancNe, 0.001),[g(t) for t in np.arange(0,ancTime / 2 / ancNe, 0.001)], "-", ms=8, lw=1, label="g(t)")
+ax.plot(np.arange(0,ancTime / 2 / ancNe, 0.001),[f(t) for t in np.arange(0,ancTime / 2 / ancNe, 0.001)], "-", ms=8, lw=1, label="f(t)")
+ax.plot(np.arange(0,ancTime / 2 / ancNe, 0.001),[rescaledcs(t) for t in np.arange(0,ancTime / 2 / ancNe, 0.001)], "-", ms=8, lw=1, label="rescaledcs(t)")
 ax.set_xlabel("Time in past")
-ax.set_ylabel("g(t)")
+ax.set_ylabel("value")
 ax.legend(); 
      
 fig, ax = plt.subplots(1, 1, figsize=(8, 4))
@@ -1047,6 +963,14 @@ ax.set_xlabel("Time in past")
 ax.set_ylabel("f(t)")
 ax.legend();     
 
+def get_map_diffs(thing):
+    diffs = []
+    i = 0
+    while i < len(thing) - 1:
+        i += 1
+        diffs.append(thing[i][0] - thing[i-1][1])
+    return diffs
+
 def bgs_wrapper(u,
                 r,
                 focalPos,
@@ -1060,38 +984,162 @@ def bgs_wrapper(u,
                 ps = None,
                 targetSize = 1e4,
                 tol = 1e-4,
-                minPos = 0,
+                minPos = None,
                 focal_s = None,
-                r_cumulative = None
                 ):
-    if L is None: # todo problem if L is none and u and r are floats
+
+
+    if type(focalPos) is not float and type(focalPos) is not int:
+        raise ValueError("focalPos must be float or int")
+    if sample_size is not list or len(sample_size) != len(sampled_demes):
+        raise ValueError("sample size must be a list of values for each sampled_deme") # 
+    if ps is not list:
+        raise ValueError("ps must be a list of the same length as ss")
+    
+    
+    
+    
+    
+    
+    # check u is correct shape
+    if type(u) is list:
+        if np.ndim(u) != 2 or np.shape(u)[1] != 3:
+            raise ValueError("If u is list it must be of the form [[start, stop, mu per bp]]")
+        else: 
+            if any([x < 0 for x in get_map_diffs(u)]):
+                raise ValueError('List u must be in increasing order by position and not overlap: u[i][0] >= u[i-1][1]')
+    elif isinstance(u, (int, float)):
+        if u < 0:
+            raise ValueError('u must be greater than 0.')
+    else:
+        raise ValueError("u must be a float or integer or list of the form [[start, stop, mu per bp]]")
+        
+    # check r is correct shape
+    if type(r) is list:
+        if np.ndim(r) == 2:
+            if np.shape(r)[1] == 2:
+                isCum = True
+                if any(z <= 0 for z in np.diff([y for x,y in r])) or any(z <= 0 for z in np.diff([x for x,y in r])):
+                    raise ValueError('if r is a cumulative map [pos, r_cumulative], then both position and r_cumulative must be strictly increasing: r[i] > r[i-1] for r[][0] and r[][1].')
+                if r[0][-1] != 0:
+                    raise ValueError('r_cumulative must begin at 0')
+            elif np.shape(r)[1] == 3:
+                isCum = False
+                if any([x != 0 for x in get_map_diffs(r)]):
+                    raise ValueError("List r must be in increasing order by position with no gaps and no overlap: r[i][0] == r[i-1][1]") 
+            else:
+                raise ValueError('If r is list it must be of the form [[start, stop, r per bp]] or [[pos, r_cumulative]]')
+        else: 
+            raise ValueError('If r is list it must be of the form [[start, stop, r per bp]] or [[pos, r_cumulative]]')
+    elif isinstance(r, (int, float)):
+        if r < 0:
+            raise ValueError('r must be greater than 0')
+    else:
+        raise ValueError("r must be a float or integer or list of the form [[start, stop, r per bp]] or [[pos, r_cumulative]]")
+    
+    # if maps provided make sure the mutation map is contained within rec map
+    if type(r) is list and type(u) is list:
+        if r[-1][-2] < u[-1][1]:
+            raise ValueError("Final position of u is greater than r. r must span the entire chromosome")
+        if r[0][0] > u[0][0]:
+            raise ValueError('Start position of u is less than the start of r. r must span the entire chromosome')
+    
+    # check that chromosome size was specified by one of L, r, or u.
+    # if not specified, create them
+    if L is None: 
         if type(u) is list:
             L = u[-1][1]
-            minPos = u[0][0]
+        # if both r and u are maps default to r for total size
         if type(r) is list:
-            L = r[-1][1] 
+            L = r[-1][-2] 
+        # if neither of the two previous statements were triggered. L is still None
+        if L is None:
+            raise ValueError("If u and r are constant values than the chrom. size, L, must be specified.")
+    # if L is specified make sure it matches the lengths given in r and/or u
+    elif isinstance(L, (int, float)):
+        if type(u) is list:
+            if u[-1][1] > L:
+                raise ValueError('There is positive mutation rate at locations greater than the provided L')
+        if type(r) is list:
+            if r[-1][-2] != L:
+                raise ValueError("Final position or r does not match the provided L. r must span the entire chromosome")
+    else:
+        raise ValueError('L must be None, int or float')
+                
+    # repeat with minPos
+    if minPos is None:
+        if type(u) is list:
+            minPos = u[0][0] 
+        # if both r and u are maps default to r for total size
+        if type(r) is list:
             minPos = r[0][0]
-        
+        # if neither of the two previous statements were triggered. L is still None
+        if L is None:
+            minPos = 0
+    # if L is specified make sure it matches the lengths given in r and/or u
+    elif isinstance(minPos, (int, float)):
+        if type(u) is list:
+            if u[0][0] < minPos:
+                raise ValueError('There is positive mutation rate at locations less than the provided minPos')
+        if type(r) is list:
+            if r[0][0] != minPos:
+                raise ValueError("start position or r does not match the provided minPos. r must span the entire chromosome")
+    else:
+        raise ValueError('minPos must be None, int or float')
+                
+    # simplify u map or convert constant rate to a map
     if type(u) is list:
         u = combine_and_split_regions(u)
     else:
         nregions = math.ceil((L - minPos)/targetSize)
         regionSize = (L - minPos) / nregions
-        u = [[minPos + regionSize * i, minPos + regionSize * (i+1), u] for i in range(nregions)]
-        
-    if ps is None:
-        ps = [1 / len(ss)] * len(ss) # TODO assert sum = 1
-        
+        u = [[minPos + regionSize * i, minPos + regionSize * (i+1), u] for i in range(nregions)]      
+                
+    # check that ss is of the correct form
+    if type(ss) is not list:
+        raise ValueError("ss must a list of selection coefficients")
+    else:
+        if np.ndim(ss) != 1:
+            raise ValueError("ss must a list of selection coefficients")
+        else:
+            if any([not isinstance(s, (int, float)) for s in ss]):
+                raise ValueError("ss must a list of selection coefficients")
+
+    # if ps specified make sure it is of right form otherwise create it
+    if type(ps) is None:
+        ps = [1 / len(ss)] * len(ss) 
+    elif ps is list:
+        if np.ndim(ps) != 1:
+            raise ValueError('ps must be a 1D list')
+        if sum(ps) != 1:
+            raise ValueError('ps must sum to 1')
+    else: 
+        raise ValueError('ps must be None or a list of probabilities')
+    
+    # define position of point masses as center of each u region
     positions = [(x + y)/2 for x,y,z in u]
 
-    if type(r) is not list:
+    # convert r to a cumulative map if not already
+    if type(r) is float: 
         r = [[minPos,L,r]]
         r = make_cum_map(r)
-    else:
-        if min(rate_diff(r)) < 0: # TODO fix this for user provided cumulative maps
-            if r_cumulative is None or r_cumulative is False:
-                r = make_cum_map(r)
+    elif type(r) is list and not isCum:
+        r = make_cum_map(r)
+
+           
+                
+                
+                
+                
+                
+                
         
+
+        
+
+        
+
+ 
     
     if cs is not None:
         if type(cs) is list:  # todo need to make sure cs is only length one
@@ -1102,7 +1150,7 @@ def bgs_wrapper(u,
             censusSize = cs(0)[0]
             
         f, ancTime, ancNe = get_scaling_fun(positions, u, ss, ps, r, focalPos, censusSize, totalT, tol)
-        rescaledcs = lambda t: [cs(t / censusSize * ancNe)[0] / censusSize] # TODO need to deal with B(t) being longer than cs
+        rescaledcs = rescale_cs(cs, totalT, ancTime, ancNe, censusSize) 
             
         g = lambda t: [x * y for x,y in zip(f(t), rescaledcs(t))]
 

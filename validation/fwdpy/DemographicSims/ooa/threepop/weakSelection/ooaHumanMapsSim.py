@@ -380,8 +380,6 @@ def runsim(args):
     rec_regions = make_rec_regions(recMap)
     sel_regions,U = make_sel_regions(mutMap, exonMap, mean, scaling)
     
-    # here
-
     demography = fwdpy11.ForwardDemesGraph.from_demes(graph, 20, burnin_is_exact=False)
     L = get_max_positions(recMap, mutMap)
     pop = fwdpy11.DiploidPopulation(demography.initial_sizes, L)
@@ -458,8 +456,8 @@ if __name__ == "__main__":
     
     midAfs = afs[1::2]
 
-    np.save("ceuData_" + str(seed) + ".npy", midAfs)
-    np.savetxt(str(seed) + "_ceu.csv", midAfs, delimiter = ",")
+    # np.save("ceuData_" + str(seed) + ".npy", midAfs)
+    # np.savetxt(str(seed) + "_ceu.csv", midAfs, delimiter = ",")
     
     import random
     ss = [random.sample(sorted(ts.samples(population_id=d)), int(40)) for d in demography.demes_at_final_generation]
@@ -470,4 +468,13 @@ if __name__ == "__main__":
                                        polarised=True, 
                                        span_normalise=False)
 
-    np.save("joint_" + str(seed) + ".npy", afs[1::2])
+    # np.save("joint_" + str(seed) + ".npy", afs[1::2])
+    
+    np.savez_compressed(str(seed), ceu=midAfs, joint=afs[1::2])
+
+    # loaded = np.load('1.npz')
+
+    # print(np.array_equal(test_array, loaded['a']))
+
+
+    # print(np.array_equal(test_vector, loaded['b']))
