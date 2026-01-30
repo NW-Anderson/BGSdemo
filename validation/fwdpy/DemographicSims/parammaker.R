@@ -77,3 +77,16 @@ for(s in c(1e-3,
 master$seed <- sample(1:1e6,nrow(master))
 write.table(master, file = "ooa.txt",
             row.names = F,col.names = F, quote=F)
+
+library(dplyr)
+master <- data.frame()
+for(demo in c("ooa.yaml")){
+  for(rep in 1:3000){
+    master <- dplyr::bind_rows(master,
+                               data.frame(demo))
+  }
+}
+
+master$seed <- sample(1:1e6,nrow(master))
+write.table(master, file = "ooaGamma.txt",
+            row.names = F,col.names = F, quote=F)
