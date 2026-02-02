@@ -1231,7 +1231,159 @@ def bgs_wrapper(u,
     else:
         raise ValueError('cs or g must be specified.')
 
+######################
+# OOA weak selection #
+######################
 
+def get_max_positions(recMap, mutMap):
+    return max(recMap[-1][1], mutMap[-1][1])
+
+def get_windows(recMap, mutMap):
+    chrom_start = recMap[0][0]
+    chrom_end = get_max_positions(recMap, mutMap)
+
+    
+    pos = [chrom_start + 5e5]
+    done = False
+    while not done:
+        new_pos = pos[-1] + 1e6
+        if new_pos <= chrom_end:
+            pos.append(new_pos)
+        else:
+            done = True
+            
+    windows = [[p - 1, p + 1] for p in pos]
+    windows = [x for w in windows for x in w]
+    windows.insert(0, 0)
+    windows.append(chrom_end)
+    
+    return windows
+
+def get_focal_pos(windows):
+    tmp = []
+    for i in range(len(windows) - 1):
+        if windows[i+1] - windows[i] == 2:
+            tmp.append([windows[i], windows[i+1]])
+    
+    return [(x+y)/2 for x,y in tmp]
+
+def read_params():
+    intervals = []
+    with open('ooaweak.txt') as f:
+        for line in f:
+            if line.startswith("#") or line.strip() == "":
+                continue
+            fields = line.strip().split()
+            s = float(fields[0])
+            demo   = str(fields[1])
+            seed  = int(fields[2])
+            intervals.append([s, demo, seed])
+    return intervals
+
+def get_ceu_data(params, curs, focalIndex):
+    seeds = [z for x,y,z in params if x == curs]
+    numSum = 0
+    data = None
+    for seed in seeds:
+        loaded = np.load(str(seed) + '.npz')
+        loaded = loaded['ceu']
+        loaded = loaded[focalIndex]
+        
+        if data is None:
+            data = loaded
+        else:
+            data = np.add(data, loaded)
+        
+        numSum += 1
+    
+    data /= numSum
+    return data
+
+    
+
+os.chdir("/home/nathan/Documents/GitHub/BGSdemo/validation/fwdpy/DemographicSims/ooa/threepop/weakSelection")
+params = read_params()
+recName = "YRI_recombination_map_hg38_chr_22.bed"
+mutName = "roulette_tbl_chr22.csv"
+exonName = "exons_chr22.bed"
+recMap = read_rec_map(recName)
+mutMap = read_mut_rates(mutName)
+exonMap = read_exon_map(exonName)
+
+recMap = simplify_rate_map(recMap)
+mutMap = simplify_rate_map(mutMap)
+
+exonMutMap, U = make_exon_only_mutmap(mutMap, exonMap) 
+
+windows = get_windows(recMap, mutMap)
+focal_positions = get_focal_pos(windows)
+# import random
+# focalPos = random.sample(focal_positions, 1)[0]
+chosen = [pos for i, pos in enumerate(focal_positions) if (i + 1) % 10 == 0 ]
+sample_size = 40
+sampled_demes = ['CEU']
+demo = demes.load('ooa.yaml')
+os.chdir('/media/nathan/T7/BGSdemo/weakSelData')
+
+
+for focalPos in chosen:
+    focalIndex = [i for i,x in enumerate(focal_positions) if x == focalPos][0]
+
+    
+    
+    fig, ax = plt.subplots(3, 2, figsize=(16, 8), sharex=True, sharey=False)
+    fig.text(0.5, 0.04, 'Allele Frequency', ha='center')
+    fig.text(0.04, 0.5, 'Count', va='center', rotation='vertical')
+    fig.subplots_adjust(hspace = .25)
+    fig.suptitle(str(focalPos))
+    for i in range(5):
+        curs = [1e-3,
+               5e-4,
+               1e-4,
+               5e-5,
+               1e-5][i]
+        
+        if i >= 3:
+            i -= 3
+            j = 1
+        else:
+            j = 0
+        
+        simData = get_ceu_data(params, curs, focalIndex)
+        simData = moments.Spectrum(simData,data_folded=False)
+        projData = simData.project([sample_size])
+        
+        fs, ancNe = bgs_wrapper(u = exonMutMap,
+                                r = recMap,
+                                focalPos = focalPos,
+                                sample_size = [sample_size],
+                                ss = [curs],
+                                sampled_demes=sampled_demes,
+                                g = demo)
+            
+        fs_neu = moments.Spectrum.from_demes(
+            demo, 
+            sampled_demes=sampled_demes, 
+            sample_sizes=[sample_size]
+        )
+        
+        oldestEpoch, ancCensusSize = getOldestEpoch(demo)
+        fs = fs * 8 * 1e-8 * ancNe
+        projData = projData * 1e-8
+        fs_neu = fs_neu * 8 * 1e-8 * ancCensusSize        
+        
+        ax[i,j].plot(fs, "-", ms=8, lw=1, label="BGS")
+        ax[i,j].plot(projData, "-", ms=8, lw=1, label="fwdpy")
+        ax[i,j].plot(fs_neu, "-", ms=8, lw=1, label="SNM")
+        ax[i,j].set_title("s = " + str(curs)) 
+        ax[i,j].set_yscale('log')
+        ax[i,j].annotate("B=" + str(round(fs.pi()/fs_neu.pi(),3)),xy=(sample_size / 10, max(fs[1:-1]) * 0.8),size="x-large")
+        ax[i,j].annotate("B_sim=" + str(round(projData.pi()/fs_neu.pi(),3)),xy=(sample_size / 10, max(fs[1:-1]) * 0.55),size="x-large")
+        if i == 1 and j == 1:
+            ax[i,j].legend();
+        
+        
+    
 
 #########################
 # OOA three populations #
