@@ -10,6 +10,8 @@ import demesdraw
 import copy
 from scipy import interpolate
 import warnings
+from __future__ import annotations
+from typing import List
 
 os.chdir('/home/nathan/Documents/GitHub/BGSdemo/validation/fwdpy')
 from deme_funs import _get_demographic_events, _get_deme_sample_sizes, _get_root_Ne, _sizes_at_time, _migration_rate_in_interval, _compute_sfs, _reorder_fs
@@ -1231,12 +1233,39 @@ def bgs_wrapper(u,
     else:
         raise ValueError('cs or g must be specified.')
 
-######################
-# OOA weak selection #
-######################
+#############
+# OOA Gamma #
+#############
+def get_ceu_data(params, focalIndex):
+    seeds = [y for x,y in params]
+    numSum = 0
+    data = None
+    for seed in seeds:
+        loaded = np.load(str(seed) + '.npz')
+        loaded = loaded['ceu']
+        loaded = loaded[focalIndex]
+        
+        if data is None:
+            data = loaded
+        else:
+            data = np.add(data, loaded)
+        
+        numSum += 1
+    
+    data /= numSum
+    return data
 
-def get_max_positions(recMap, mutMap):
-    return max(recMap[-1][1], mutMap[-1][1])
+def read_params():
+    intervals = []
+    with open('ooaGamma.txt') as f:
+        for line in f:
+            if line.startswith("#") or line.strip() == "":
+                continue
+            fields = line.strip().split()
+            demo   = str(fields[0])
+            seed  = int(fields[1])
+            intervals.append([demo, seed])
+    return intervals
 
 def get_windows(recMap, mutMap):
     chrom_start = recMap[0][0]
@@ -1266,6 +1295,196 @@ def get_focal_pos(windows):
             tmp.append([windows[i], windows[i+1]])
     
     return [(x+y)/2 for x,y in tmp]
+
+def get_max_positions(recMap, mutMap):
+    return max(recMap[-1][1], mutMap[-1][1])
+
+# 875 / 2 / 12378 * shape to get the 0.006 number
+mean = 0.00657416 / 2
+shape = 0.186
+n_bins = 20
+representative = 'conditional_mean'
+def discretize_deleterious_gamma_dfe_mean_shape(
+    mean,
+    shape,
+    n_bins,
+    representative = "conditional_mean"):
+    """
+    Discretize a deleterious Gamma DFE parameterized by (mean, shape)
+    into a list [[p, s], ...], with s > 0.
+
+    Gamma parameterization:
+        S ~ Gamma(k=shape, theta=mean/shape)
+        E[S] = mean
+
+    Binning scheme:
+        Equal-probability (quantile) bins, with a final [q, +inf) tail.
+        No truncation.
+
+    Parameters
+    ----------
+    mean : float
+        Mean deleterious magnitude E[S] > 0.
+    shape : float
+        Gamma shape k > 0.
+    n_bins : int
+        Number of bins >= 1.
+    representative : {"conditional_mean", "mid_quantile"}
+        Representative value per bin.
+
+    Returns
+    -------
+    dfe : list of [p, s]
+        Discrete DFE with probabilities p and selection coefficients s < 0.
+
+    Notes
+    -----
+    Requires SciPy.
+    """
+    if mean <= 0:
+        raise ValueError("mean must be > 0")
+    if shape <= 0:
+        raise ValueError("shape must be > 0")
+    if n_bins < 1 or int(n_bins) != n_bins:
+        raise ValueError("n_bins must be an integer >= 1")
+
+    representative = representative.lower()
+    if representative not in {"conditional_mean", "mid_quantile"}:
+        raise ValueError("representative must be 'conditional_mean' or 'mid_quantile'")
+
+    try:
+        from scipy.stats import gamma as gamma_dist
+    except ImportError as e:
+        raise ImportError("This function requires SciPy (pip install scipy).") from e
+
+    k = float(shape)
+    mean = float(mean)
+    theta = mean / k
+    n = int(n_bins)
+
+    # Single-bin edge case
+    if n == 1:
+        return [[1.0, mean]]
+
+    dist_k = gamma_dist(a=k, scale=theta)
+    dist_k1 = gamma_dist(a=k + 1.0, scale=theta)
+
+    p = 1.0 / n
+
+    # Interior quantile cutpoints: F^{-1}(i/n)
+    cutpoints = [dist_k.ppf(i / n) for i in range(1, n)]
+
+    bounds = [(0.0, cutpoints[0])]
+    for i in range(1, len(cutpoints)):
+        bounds.append((cutpoints[i - 1], cutpoints[i]))
+    bounds.append((cutpoints[-1], float("inf")))
+
+    dfe: List[List[float]] = []
+
+    if representative == "mid_quantile":
+        for i in range(n):
+            u = (i + 0.5) / n
+            s_mag = dist_k.ppf(u)
+            dfe.append([p, -float(s_mag)])
+        return dfe
+
+    # Conditional-mean representative
+    for (a, b) in bounds:
+        if b == float("inf"):
+            denom = dist_k.sf(a)
+            numer = dist_k1.sf(a)
+        else:
+            denom = dist_k.cdf(b) - dist_k.cdf(a)
+            numer = dist_k1.cdf(b) - dist_k1.cdf(a)
+
+        if denom <= 0:
+            raise RuntimeError(f"Nonpositive bin mass for bin [{a}, {b}].")
+
+        mean_mag = (theta * k) * (numer / denom)
+        dfe.append([p, -float(mean_mag)])
+
+    return dfe
+
+os.chdir("/home/nathan/Documents/GitHub/BGSdemo/validation/fwdpy/DemographicSims/ooa/threepop/weakSelection")
+params = read_params()
+recName = "YRI_recombination_map_hg38_chr_22.bed"
+mutName = "roulette_tbl_chr22.csv"
+exonName = "exons_chr22.bed"
+recMap = read_rec_map(recName)
+mutMap = read_mut_rates(mutName)
+exonMap = read_exon_map(exonName)
+
+recMap = simplify_rate_map(recMap)
+mutMap = simplify_rate_map(mutMap)
+
+exonMutMap, U = make_exon_only_mutmap(mutMap, exonMap) 
+
+windows = get_windows(recMap, mutMap)
+focal_positions = get_focal_pos(windows)
+# import random
+# focalPos = random.sample(focal_positions, 1)[0]
+chosen = [pos for i, pos in enumerate(focal_positions) if (i + 1) % 10 == 0 ]
+sample_size = 40
+sampled_demes = ['CEU']
+demo = demes.load('ooa.yaml')
+os.chdir('/media/nathan/T7/BGSdemo/gammaOOAData')
+
+for focalPos in chosen:
+    focalIndex = [i for i,x in enumerate(focal_positions) if x == focalPos][0]
+
+    simData = get_ceu_data(params, focalIndex)
+    simData = moments.Spectrum(simData,data_folded=False)
+    projData = simData.project([sample_size])
+    
+    fig, ax = plt.subplots(3, 2, figsize=(16, 8), sharex=True, sharey=False)
+    fig.text(0.5, 0.04, 'Allele Frequency', ha='center')
+    fig.text(0.04, 0.5, 'Count', va='center', rotation='vertical')
+    fig.subplots_adjust(hspace = .25)
+    fig.suptitle(str(focalPos))
+    for i in range(6):
+        nbins = [1, 10, 20, 30, 40, 50][i]
+        
+        if i >= 3:
+            i -= 3
+            j = 1
+        else:
+            j = 0
+        
+
+        
+        fs, ancNe = bgs_wrapper(u = exonMutMap,
+                                r = recMap,
+                                focalPos = focalPos,
+                                sample_size = [sample_size],
+                                ss = [curs],
+                                sampled_demes=sampled_demes,
+                                g = demo)
+            
+        fs_neu = moments.Spectrum.from_demes(
+            demo, 
+            sampled_demes=sampled_demes, 
+            sample_sizes=[sample_size]
+        )
+        
+        oldestEpoch, ancCensusSize = getOldestEpoch(demo)
+        fs = fs * 8 * 1e-8 * ancNe
+        projData = projData * 1e-8
+        fs_neu = fs_neu * 8 * 1e-8 * ancCensusSize        
+        
+        ax[i,j].plot(fs, "-", ms=8, lw=1, label="BGS")
+        ax[i,j].plot(projData, "-", ms=8, lw=1, label="fwdpy")
+        ax[i,j].plot(fs_neu, "-", ms=8, lw=1, label="SNM")
+        ax[i,j].set_title("s = " + str(curs)) 
+        ax[i,j].set_yscale('log')
+        ax[i,j].annotate("B=" + str(round(fs.pi()/fs_neu.pi(),3)),xy=(sample_size / 10, max(fs[1:-1]) * 0.8),size="x-large")
+        ax[i,j].annotate("B_sim=" + str(round(projData.pi()/fs_neu.pi(),3)),xy=(sample_size / 10, max(fs[1:-1]) * 0.55),size="x-large")
+        if i == 1 and j == 1:
+            ax[i,j].legend();
+
+######################
+# OOA weak selection #
+######################
+
 
 def read_params():
     intervals = []
