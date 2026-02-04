@@ -317,6 +317,31 @@ def get_scaling_fun(positions, u, ss, ps, r, focalPos, censusSize, totalT, tol):
     ancNe = ancB * censusSize
     return(lambda t: [math.exp(sum([p * rescaledPointMassContribution(u, s, t, r, ancNe, ancTime) for u,r in zip(scaledu, recDist) for p,s in zip(ps, ss)])) / ancB], ancTime, ancNe)
   
+def get_scaling_fun_2(positions, u, ss, ps, r, focalPos, censusSize, totalT, tol, grid_pts):
+    scaledu = [z * (y - x) for x,y,z in u]
+    recDist = [getRecDist(pos, r, focalPos) for pos in positions]
+    
+    diff = 100
+    start = 1
+    i = 0
+    while abs(diff) > tol:
+        end = B(scaledu, ss, ps, (i + 1) * censusSize / 10, recDist)
+        diff = end - start
+        start = end
+        i += 1
+        
+    ancTime = censusSize / 10 * i
+    ancTime = max(ancTime, totalT * 2 * censusSize)
+    ancB = B(scaledu, ss, ps, ancTime, recDist)
+    ancNe = ancB * censusSize
+    
+    tmp_fun = lambda t: math.exp(sum([p * rescaledPointMassContribution(u, s, t, r, ancNe, ancTime) for u,r in zip(scaledu, recDist) for p,s in zip(ps, ss)])) / ancB
+    
+    ts = np.linspace(0, ancTime / 2 / ancNe, grid_pts)
+    bs = [tmp_fun(t) for t in ts]
+    
+    return(interpolate.interp1d(ts, bs), ancTime, ancNe)
+       
 def getOldestEpoch(graph):
     tme = 0
     for deme in graph.demes:
@@ -839,6 +864,25 @@ def get_map_diffs(thing):
         diffs.append(thing[i][0] - thing[i-1][1])
     return diffs   
 
+
+# u = exonMutMap
+# r = recMap
+# focalPos = focalPos
+# sample_size = [sample_size]
+# ss = ss
+# sampled_demes=sampled_demes
+# g = demo
+
+# cs = None
+# totalT = None
+# L = None
+# ps = None
+# targetSize = 1e4
+# tol = 1e-4
+# minPos = None
+# focal_s = None
+
+
 def bgs_wrapper(u,
                 r,
                 focalPos,
@@ -1068,7 +1112,38 @@ def bgs_wrapper(u,
             totalT = totalgen / 2 / censusSize
             
         # define scaling function
-        f, ancTime, ancNe = get_scaling_fun(positions, u, ss, ps, r, focalPos, censusSize, totalT, tol)    
+        # f, ancTime, ancNe = get_scaling_fun(positions, u, ss, ps, r, focalPos, censusSize, totalT, tol)    
+       
+        # testing 
+        ff, ancTime, ancNe = get_scaling_fun_2(positions, u, ss, ps, r, focalPos, censusSize, totalT, tol, 100)
+        f = lambda t: [ff(t).tolist()]
+        
+        # fig, ax = plt.subplots(1, 1, figsize=(8, 4))
+        # ax.plot(np.arange(0,ancTime / 2 / ancNe, 0.001),[g(t) for t in np.arange(0,ancTime / 2 / ancNe, 0.001)], "-", ms=8, lw=1, label="orig")
+        # ax.plot(np.arange(0,ancTime / 2 / ancNe, 0.001),[f(t) for t in np.arange(0,ancTime / 2 / ancNe, 0.001)], "-", ms=8, lw=1, label="100")
+        # ax.set_xlabel("Time in past")
+        # ax.set_ylabel("B(t)")
+        # ax.legend(); 
+        
+        # testing
+        # ff, ffancTime, ffancNe = get_scaling_fun_2(positions, u, ss, ps, r, focalPos, censusSize, totalT, tol, 100)
+        # fff, fffancTime, fffancNe = get_scaling_fun_2(positions, u, ss, ps, r, focalPos, censusSize, totalT, tol, 1000)
+        # ffff, ffffancTime, ffffancNe = get_scaling_fun_2(positions, u, ss, ps, r, focalPos, censusSize, totalT, tol, 10000)
+        
+        # ancTime = fancTime
+        # ancNe = fancNe 
+        
+        # fig, ax = plt.subplots(1, 1, figsize=(8, 4))
+        # ax.plot(np.arange(0,ancTime / 2 / ancNe, 0.001),[f(t) for t in np.arange(0,ancTime / 2 / ancNe, 0.001)], "-", ms=8, lw=1, label="orig")
+        # # ax.plot(np.arange(0,ancTime / 2 / ancNe, 0.001),[ff(t) for t in np.arange(0,ancTime / 2 / ancNe, 0.001)], "-", ms=8, lw=1, label="100")
+        # # ax.plot(np.arange(0,ancTime / 2 / ancNe, 0.001),[fff(t) for t in np.arange(0,ancTime / 2 / ancNe, 0.001)], "-", ms=8, lw=1, label="1e3")
+        # # ax.plot(np.arange(0,ancTime / 2 / ancNe, 0.001),[ffff(t) for t in np.arange(0,ancTime / 2 / ancNe, 0.001)], "-", ms=8, lw=1, label="1e4")
+        # ax.set_xlabel("Time in past")
+        # ax.set_ylabel("B(t)")
+        # ax.legend();   
+        
+        # testing
+        # return f, ancTime, ancNe
         
         # define gamma 
         if isinstance(focal_s, (int, float)):
@@ -1225,7 +1300,7 @@ nbins = 10
 
 dfe = discretize_deleterious_gamma_dfe_mean_shape(mean, shape, nbins)
 
-ss = [y for x,y in dfe]
+ss = [y for x,y in dfe] 
 
 fs, ancNe = bgs_wrapper(u = exonMutMap,
                         r = recMap,
@@ -1234,3 +1309,31 @@ fs, ancNe = bgs_wrapper(u = exonMutMap,
                         ss = ss,
                         sampled_demes=sampled_demes,
                         g = demo)
+
+# test = []
+# for i in range(1,16):
+#     nbins = i
+#     dfe = discretize_deleterious_gamma_dfe_mean_shape(mean, shape, nbins)
+
+#     ss = [y for x,y in dfe] 
+#     f, ancTime, ancNe = bgs_wrapper(u = exonMutMap,
+#                             r = recMap,
+#                             focalPos = focalPos,
+#                             sample_size = [sample_size],
+#                             ss = ss,
+#                             sampled_demes=sampled_demes,
+#                             g = demo)
+#     test.append(ancTime)
+    
+# fig, ax = plt.subplots(1, 1, figsize=(8, 4))
+# ax.plot(range(1,16),test, "-", ms=8, lw=1, label="ancTime")
+# ax.set_xlabel("Time in past")
+# ax.set_ylabel("generations")
+# ax.legend();    
+
+
+# fig, ax = plt.subplots(1, 1, figsize=(8, 4))
+# ax.plot(np.arange(0,ancTime / 2 / ancNe, 0.001),[f(t) for t in np.arange(0,ancTime / 2 / ancNe, 0.001)], "-", ms=8, lw=1, label="B(t)")
+# ax.set_xlabel("Time in past")
+# ax.set_ylabel("B(t)")
+# ax.legend();    
