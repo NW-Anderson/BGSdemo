@@ -341,7 +341,7 @@ def B(scaledu, ss, ps, t, recDist):
 def rescaledPointMassContribution(scaledu, s, t, r, ancestralNe, ancTime):
     return - scaledu / s * (s / (r + s) * (1 - math.exp(- r * (ancTime - t * 2 * ancestralNe) - s * (ancTime - t * 2 * ancestralNe))))**2
 
-def get_scaling_fun(positions, u, ss, ps, r, focalPos, censusSize, totalT, tol):
+def get_scaling_fun(positions, u, ss, ps, r, focalPos, censusSize, totalT, tol, grid_pts = 100):
     scaledu = [z * (y - x) for x,y,z in u]
     recDist = [getRecDist(pos, r, focalPos) for pos in positions]
     
@@ -358,7 +358,40 @@ def get_scaling_fun(positions, u, ss, ps, r, focalPos, censusSize, totalT, tol):
     ancTime = max(ancTime, totalT * 2 * censusSize)
     ancB = B(scaledu, ss, ps, ancTime, recDist)
     ancNe = ancB * censusSize
-    return(lambda t: [math.exp(sum([p * rescaledPointMassContribution(u, s, t, r, ancNe, ancTime) for u,r in zip(scaledu, recDist) for p,s in zip(ps, ss)])) / ancB], ancTime, ancNe)
+    
+    tmp_fun = lambda t: math.exp(sum([p * rescaledPointMassContribution(u, s, t, r, ancNe, ancTime) for u,r in zip(scaledu, recDist) for p,s in zip(ps, ss)])) / ancB
+    
+    ts = np.linspace(0, ancTime / 2 / ancNe, grid_pts)
+    bs = [tmp_fun(t) for t in ts]
+    
+    tmp_fun = interpolate.interp1d(ts, bs)
+    def q_fun(t):
+        tt = t
+        if tt < 0:
+            tt = 0
+        elif tt > ancTime / 2 / ancNe:
+            tt = ancTime / 2 / ancNe
+        return [tmp_fun(tt).tolist()]
+    return(q_fun, ancTime, ancNe)
+
+# def get_scaling_fun(positions, u, ss, ps, r, focalPos, censusSize, totalT, tol):
+#     scaledu = [z * (y - x) for x,y,z in u]
+#     recDist = [getRecDist(pos, r, focalPos) for pos in positions]
+    
+#     diff = 100
+#     start = 1
+#     i = 0
+#     while abs(diff) > tol:
+#         end = B(scaledu, ss, ps, (i + 1) * censusSize / 10, recDist)
+#         diff = end - start
+#         start = end
+#         i += 1
+        
+#     ancTime = censusSize / 10 * i
+#     ancTime = max(ancTime, totalT * 2 * censusSize)
+#     ancB = B(scaledu, ss, ps, ancTime, recDist)
+#     ancNe = ancB * censusSize
+#     return(lambda t: [math.exp(sum([p * rescaledPointMassContribution(u, s, t, r, ancNe, ancTime) for u,r in zip(scaledu, recDist) for p,s in zip(ps, ss)])) / ancB], ancTime, ancNe)
   
 def getOldestEpoch(graph):
     tme = 0
@@ -974,7 +1007,7 @@ def get_map_diffs(thing):
 # ax.set_xlabel("Time in past")
 # ax.set_ylabel("f(t)")
 # ax.legend();     
-
+                        
 def bgs_wrapper(u,
                 r,
                 focalPos,
@@ -1161,6 +1194,7 @@ def bgs_wrapper(u,
             raise ValueError('totalT must be float or int')
 
         # define scaling function
+        # f, ancTime, ancNe = get_scaling_fun(positions, u, ss, ps, r, focalPos, censusSize, totalT, tol)
         f, ancTime, ancNe = get_scaling_fun(positions, u, ss, ps, r, focalPos, censusSize, totalT, tol)
         # rescale census size function to be in units of 2 * Ne_bgs generations 
         rescaledcs = rescale_cs(cs, totalT, ancTime, ancNe, censusSize) 
@@ -1204,7 +1238,8 @@ def bgs_wrapper(u,
             totalT = totalgen / 2 / censusSize
             
         # define scaling function
-        f, ancTime, ancNe = get_scaling_fun(positions, u, ss, ps, r, focalPos, censusSize, totalT, tol)    
+        # f, ancTime, ancNe = get_scaling_fun(positions, u, ss, ps, r, focalPos, censusSize, totalT, tol)    
+        f, ancTime, ancNe = get_scaling_fun(positions, u, ss, ps, r, focalPos, censusSize, totalT, tol)
         
         # define gamma 
         if isinstance(focal_s, (int, float)):
@@ -1236,14 +1271,14 @@ def bgs_wrapper(u,
 #############
 # OOA Gamma #
 #############
-def get_ceu_data(params, focalIndex):
+def get_ceu_data(params):
     seeds = [y for x,y in params]
     numSum = 0
     data = None
     for seed in seeds:
         loaded = np.load(str(seed) + '.npz')
         loaded = loaded['ceu']
-        loaded = loaded[focalIndex]
+        loaded = loaded
         
         if data is None:
             data = loaded
@@ -1449,11 +1484,12 @@ os.chdir('/media/nathan/T7/BGSdemo/gammaOOAData')
 #                         sampled_demes=sampled_demes,
 #                         g = demo)
 
-for focalPos in chosen:
+all_data = get_ceu_data(params)
+
+for focalPos in focal_positions:
     focalIndex = [i for i,x in enumerate(focal_positions) if x == focalPos][0]
 
-    simData = get_ceu_data(params, focalIndex)
-    simData = moments.Spectrum(simData,data_folded=False)
+    simData = moments.Spectrum(all_data[focalIndex],data_folded=False)
     
     fig, ax = plt.subplots(2, 2, figsize=(16, 8), sharex=True, sharey=False)
     fig.text(0.5, 0.04, 'Allele Frequency', ha='center')
