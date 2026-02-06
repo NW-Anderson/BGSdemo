@@ -309,7 +309,41 @@ def get_windows(args):
 
     return windows
 
+def get_map_diffs(thing):
+    diffs = []
+    i = 0
+    while i < len(thing) - 1:
+        i += 1
+        diffs.append(thing[i][0] - thing[i-1][1])
+    return diffs
 
+def get_exon_windows(args):
+    recName = args.recombination_map
+    mutName = args.mutation_map
+    exonName = args.exon_map
+
+    # test
+    # os.chdir("/home/nathan/Documents/GitHub/BGSdemo/validation/fwdpy/DemographicSims/ooa/threepop/weakSelection")
+    # recName = "YRI_recombination_map_hg38_chr_22.bed"
+    # mutName = "roulette_tbl_chr22.csv"
+    # exonName = "exons_chr22.bed"
+
+    recMap = read_rec_map(recName)
+    recMap = simplify_rate_map(recMap)
+
+    mutMap = read_mut_rates(mutName)
+    mutMap = simplify_rate_map(mutMap)
+    
+    exonMap = read_exon_map(exonName)
+    
+    chrom_end = get_max_positions(recMap, mutMap)
+    
+    windows = [x for w in exonMap for x in w]
+    windows.insert(0, 0)
+    windows.append(chrom_end)
+
+    return windows    
+    
 def runsim(args):
     """
     args: The parsed arguments
@@ -426,7 +460,8 @@ if __name__ == "__main__":
         if demography.deme_labels[deme] == "CEU":
             ceuIndex = deme
 
-    windows = get_windows(args)
+    # windows = get_windows(args)
+    windows = get_exon_windows(args)
 
     afs = ts.allele_frequency_spectrum(sample_sets=[ts.samples(population_id=ceuIndex)],
                                        windows=windows,
@@ -436,17 +471,19 @@ if __name__ == "__main__":
 
     midAfs = afs[1::2]
 
+    np.savez_compressed(str(seed), ceu=midAfs)
+    
     # np.save("ceuData_" + str(seed) + ".npy", midAfs)
     # np.savetxt(str(seed) + "_ceu.csv", midAfs, delimiter=",")
 
-    import random
-    ss = [random.sample(sorted(ts.samples(population_id=d)), int(40))
-          for d in demography.demes_at_final_generation]
+    # import random
+    # ss = [random.sample(sorted(ts.samples(population_id=d)), int(40))
+    #       for d in demography.demes_at_final_generation]
 
-    afs = ts.allele_frequency_spectrum(sample_sets=ss,
-                                       windows=windows,
-                                       mode="branch",
-                                       polarised=True,
-                                       span_normalise=False)
+    # afs = ts.allele_frequency_spectrum(sample_sets=ss,
+    #                                    windows=windows,
+    #                                    mode="branch",
+    #                                    polarised=True,
+    #                                    span_normalise=False)
 
-    np.savez_compressed(str(seed), ceu=midAfs, joint=afs[1::2])
+    # np.savez_compressed(str(seed), ceu=midAfs, joint=afs[1::2])
