@@ -283,12 +283,6 @@ def combine_and_split_regions(exonMutMap, targetSize = 1e4):
     
     return combined
 
-def pointMassContribution(u, s, t, r):
-    return - u / s * (s / (r + s) * (1 - math.exp(- r * t - s * t)))**2
-
-def B(scaledu, ss, ps, t, recDist):
-    return math.exp(sum([p * pointMassContribution(u, s, t, r) for u,r in zip(scaledu, recDist) for p,s in zip(ps, ss)]))
-
 def rescaledPointMassContribution(scaledu, s, t, r, ancestralNe, ancTime):
     return - scaledu / s * (s / (r + s) * (1 - math.exp(- r * (ancTime - t * 2 * ancestralNe) - s * (ancTime - t * 2 * ancestralNe))))**2
 
@@ -953,267 +947,6 @@ def discretize_deleterious_gamma_dfe_mean_shape(
 ######## integrated #########
 #############################   
 
-u = exonMutMap
-r = recMap
-focal_positions = focal_positions
-ss = ss
-
-L = None
-ps = None
-targetSize = 1e4
-tol = 1e-4
-minPos = None
-
-def cluster_scale_funs(u,
-                r,
-                focal_positions,
-                ss,
-                L = None,
-                ps = None,
-                targetSize = 1e4,
-                tol = 1e-4,
-                minPos = None,):
-    # check u is correct shape
-    if type(u) is list:
-        if np.ndim(u) != 2 or np.shape(u)[1] != 3:
-            raise ValueError("If u is list it must be of the form [[start, stop, mu per bp]]")
-        else: 
-            if any([x < 0 for x in get_map_diffs(u)]):
-                raise ValueError('List u must be in increasing order by position and not overlap: u[i][0] >= u[i-1][1]')
-    elif isinstance(u, (int, float)):
-        if u < 0:
-            raise ValueError('u must be greater than 0.')
-    else:
-        raise ValueError("u must be a float or integer or list of the form [[start, stop, mu per bp]]")
-        
-    # check r is correct shape
-    if type(r) is list:
-        if np.ndim(r) == 2:
-            if np.shape(r)[1] == 2:
-                isCum = True
-                if any(z <= 0 for z in np.diff([y for x,y in r])) or any(z <= 0 for z in np.diff([x for x,y in r])):
-                    raise ValueError('if r is a cumulative map [pos, r_cumulative], then both position and r_cumulative must be strictly increasing: r[i] > r[i-1] for r[][0] and r[][1].')
-                if r[0][-1] != 0:
-                    raise ValueError('r_cumulative must begin at 0')
-            elif np.shape(r)[1] == 3:
-                isCum = False
-                if any([x != 0 for x in get_map_diffs(r)]):
-                    raise ValueError("List r must be in increasing order by position with no gaps and no overlap: r[i][0] == r[i-1][1]") 
-            else:
-                raise ValueError('If r is list it must be of the form [[start, stop, r per bp]] or [[pos, r_cumulative]]')
-        else: 
-            raise ValueError('If r is list it must be of the form [[start, stop, r per bp]] or [[pos, r_cumulative]]')
-    elif isinstance(r, (int, float)):
-        if r < 0:
-            raise ValueError('r must be greater than 0')
-    else:
-        raise ValueError("r must be a float or integer or list of the form [[start, stop, r per bp]] or [[pos, r_cumulative]]")
-    
-    # if maps provided make sure the mutation map is contained within rec map
-    if type(r) is list and type(u) is list:
-        if r[-1][-2] < u[-1][1]:
-            raise ValueError("Final position of u is greater than r. r must span the entire chromosome")
-        if r[0][0] > u[0][0]:
-            raise ValueError('Start position of u is less than the start of r. r must span the entire chromosome')
-    
-    # check that chromosome size was specified by one of L, r, or u.
-    # if not specified, create them
-    # TODO L = r[-1][-2] for cum maps means type(L) is numpy.int64? does this matter?
-    if L is None: 
-        if type(u) is list:
-            L = u[-1][1]
-        # if both r and u are maps default to r for total size
-        if type(r) is list:
-            L = r[-1][-2] 
-        # if neither of the two previous statements were triggered. L is still None
-        if L is None:
-            raise ValueError("If u and r are constant values than the chrom. size, L, must be specified.")
-    # if L is specified make sure it matches the lengths given in r and/or u
-    elif isinstance(L, (int, float)):
-        if type(u) is list:
-            if u[-1][1] > L:
-                raise ValueError('There is positive mutation rate at locations greater than the provided L')
-        if type(r) is list:
-            if r[-1][-2] != L:
-                raise ValueError("Final position or r does not match the provided L. r must span the entire chromosome")
-    else:
-        raise ValueError('L must be None, int or float')
-                
-    # repeat with minPos
-    if minPos is None:
-        if type(u) is list:
-            minPos = u[0][0] 
-        # if both r and u are maps default to r for total size
-        if type(r) is list:
-            minPos = r[0][0]
-        # if neither of the two previous statements were triggered. L is still None
-        if minPos is None:
-            minPos = 0
-    # if L is specified make sure it matches the lengths given in r and/or u
-    elif isinstance(minPos, (int, float)):
-        if type(u) is list:
-            if u[0][0] < minPos:
-                raise ValueError('There is positive mutation rate at locations less than the provided minPos')
-        if type(r) is list:
-            if r[0][0] != minPos:
-                raise ValueError("start position or r does not match the provided minPos. r must span the entire chromosome")
-    else:
-        raise ValueError('minPos must be None, int or float')
-                
-    # simplify u map or convert constant rate to a map
-    if type(u) is list:
-        u = combine_and_split_regions(u)
-    else:
-        nregions = math.ceil((L - minPos)/targetSize)
-        regionSize = (L - minPos) / nregions
-        u = [[minPos + regionSize * i, minPos + regionSize * (i+1), u] for i in range(nregions)]      
-                
-    # check that ss is of the correct form
-    if type(ss) is not list:
-        raise ValueError("ss must a list of selection coefficients")
-    else:
-        if np.ndim(ss) != 1:
-            raise ValueError("ss must be a 1D list")
-        else:
-            if any([not isinstance(s, (int, float)) for s in ss]):
-                raise ValueError("ss must a list of int or float selection coefficients")
-
-    # if ps specified make sure it is of right form otherwise create it
-    if ps is None:
-        ps = [1 / len(ss)] * len(ss) 
-    elif type(ps) is list:
-        if np.ndim(ps) != 1:
-            raise ValueError('ps must be a 1D list')
-        if any([not isinstance(p, (int, float)) for p in ps]):
-            raise ValueError("ps must a list of probabilitie that a new mutation has selection coefficient given by ss")
-        if sum(ps) != 1:
-            raise ValueError('ps must sum to 1')
-        if len(ps) != len(ss):
-            raise ValueError('ps and ss must be the same length')
-    else: 
-        raise ValueError('ps must be None or a list of probabilities')
-    
-    # define position of point masses as center of each u region
-    positions = [(x + y)/2 for x,y,z in u]
-
-    # convert r to a cumulative interpolating function
-    if type(r) is float: 
-        r = [[minPos,L,r]]
-        r = make_cum_map(r)
-    elif type(r) is list:
-        r = make_cum_map(r, isCum)
-            
-    # ensure focalPos and tol are specified and numbers
-    if not isinstance(tol, (int, float)):
-        raise ValueError('tol must be float or int') 
-    if type(focal_positions) is not list:
-        if not isinstance(focal_positions[0], (int, float)):
-            raise ValueError('focal_positions must be a list of int or float')
-    
-
-   get_Bs(positions, u, ss, ps, r, focal_positions, tol)
-
-
-def B(scaledu, ss, ps, t, recDist):
-    return math.exp(sum([p * pointMassContribution(u, s, t, r) for u,r in zip(scaledu, recDist) for p,s in zip(ps, ss)]))
-
-def extend_b_range(b, t, ancTime):
-    tt = t 
-    if t > ancTime:
-        tt = ancTime
-    return(b(tt).tolist())
-
-def getRecDist(pos,r,focalPos):
-    left = min(pos, focalPos)
-    right = max(pos, focalPos)
-    
-    bigR = r(right) - r(left)
-    return (1 - np.exp(- 2 * bigR)) / 2    
-
-def getRecDist_2(pos,r,focalPos):
-    bigR = abs(r(pos) - r(focalPos))
-    return (1 - np.exp(- 2 * bigR)) / 2
-
-def getRecDist_3(positions, r, focal_positions):
-    Rpos = r(positions)   # shape (M,)
-    Rfoc = r(focal_positions)   # shape (F,)
-    
-    bigR = np.abs(Rpos[None, :] - Rfoc[:, None])           # (F, M)
-    return 0.5 * (1.0 - np.exp(-2.0 * bigR))            # (F, M)
-
-
-fig, ax = plt.subplots(1, 1, figsize=(8, 4))
-ax.plot(np.arange(0,ancTime, 1),[B(scaledu, ss, ps, t, rd) for t in np.arange(0,ancTime,1)], "-", ms=8, lw=1, label="B(t)")
-ax.set_xlabel("Time in past")
-ax.set_ylabel("B(t)")
-ax.legend(); 
-
-def get_Bs(positions, u, ss, ps, r, focal_positions, tol, grid_pts = 100):
-    scaledu = [z * (y - x) for x,y,z in u]
-    
-    startTime = datetime.now()
-    recDist = getRecDist_3(positions, r, focal_positions) # recDist[i, j] is distance between focal_positions[i] and positions[j]
-    endTime = datetime.now()
-    endTime - startTime
-        
-    all_bs = []
-    for i in range(len(focal_positions)):
-        rd = recDist[i]
-        fp = focal_positions[i]
-        
-        diff = 100
-        start = 1
-        j = 0
-        bvals = [1]
-        while(abs(diff) > tol):
-            end = B(scaledu, ss, ps, (j + 1) * 1e2, rd)
-            bvals.append(end)
-            diff = end - start
-            start = end
-            j += 1
-            
-        all_bs.append(bvals)
-            
-            
-
-    
-    b_funs = []
-    
-    startTime = datetime.now()
-
-    maxAncTime = 0
-    i = 0
-    for focalPos in focal_positions:    
-        recDist = [getRecDist_2(pos, r, focalPos) for pos in positions]
-           
-    endTime = datetime.now()
-    endTime - startTime
-    #     i+=1
-    #     print(i)
-        
-    #     diff = 100
-    #     start = 1
-    #     i = 0
-    #     while abs(diff) > tol:
-    #         end = B(scaledu, ss, ps, (i + 1) * 1e3, recDist)
-    #         diff = end - start
-    #         start = end
-    #         i += 1
-        
-    #     if 1e3 * i > maxAncTime:
-    #         maxAncTime = 1e3 * i
-    
-    # ancB = B(scaledu, ss, ps, ancTime, recDist)
-    
-    # ts = np.linspace(0, ancTime, grid_pts)
-    # bvals = [B(scaledu, ss, ps, t, recDist) for t in ts]
-    
-    # tmp_fun = interpolate.interp1d(ts, bvals)
-    # b_funs.append(lambda t: extend_b_range(tmp_fun, t, ancTime))
-    
-    
-
-                   
 def bgs_wrapper(u,
                 r,
                 focalPos,
@@ -1473,6 +1206,315 @@ def bgs_wrapper(u,
         return fs, ancNe
     else:
         raise ValueError('cs or g must be specified.')
+
+u = exonMutMap
+r = recMap
+focal_positions = focal_positions
+ss = ss
+
+L = None
+ps = None
+targetSize = 1e4
+tol = 1e-4
+minPos = None
+
+def cluster_scale_funs(u,
+                r,
+                focal_positions,
+                ss,
+                L = None,
+                ps = None,
+                targetSize = 1e4,
+                tol = 1e-4,
+                minPos = None,):
+    # check u is correct shape
+    if type(u) is list:
+        if np.ndim(u) != 2 or np.shape(u)[1] != 3:
+            raise ValueError("If u is list it must be of the form [[start, stop, mu per bp]]")
+        else: 
+            if any([x < 0 for x in get_map_diffs(u)]):
+                raise ValueError('List u must be in increasing order by position and not overlap: u[i][0] >= u[i-1][1]')
+    elif isinstance(u, (int, float)):
+        if u < 0:
+            raise ValueError('u must be greater than 0.')
+    else:
+        raise ValueError("u must be a float or integer or list of the form [[start, stop, mu per bp]]")
+        
+    # check r is correct shape
+    if type(r) is list:
+        if np.ndim(r) == 2:
+            if np.shape(r)[1] == 2:
+                isCum = True
+                if any(z <= 0 for z in np.diff([y for x,y in r])) or any(z <= 0 for z in np.diff([x for x,y in r])):
+                    raise ValueError('if r is a cumulative map [pos, r_cumulative], then both position and r_cumulative must be strictly increasing: r[i] > r[i-1] for r[][0] and r[][1].')
+                if r[0][-1] != 0:
+                    raise ValueError('r_cumulative must begin at 0')
+            elif np.shape(r)[1] == 3:
+                isCum = False
+                if any([x != 0 for x in get_map_diffs(r)]):
+                    raise ValueError("List r must be in increasing order by position with no gaps and no overlap: r[i][0] == r[i-1][1]") 
+            else:
+                raise ValueError('If r is list it must be of the form [[start, stop, r per bp]] or [[pos, r_cumulative]]')
+        else: 
+            raise ValueError('If r is list it must be of the form [[start, stop, r per bp]] or [[pos, r_cumulative]]')
+    elif isinstance(r, (int, float)):
+        if r < 0:
+            raise ValueError('r must be greater than 0')
+    else:
+        raise ValueError("r must be a float or integer or list of the form [[start, stop, r per bp]] or [[pos, r_cumulative]]")
+    
+    # if maps provided make sure the mutation map is contained within rec map
+    if type(r) is list and type(u) is list:
+        if r[-1][-2] < u[-1][1]:
+            raise ValueError("Final position of u is greater than r. r must span the entire chromosome")
+        if r[0][0] > u[0][0]:
+            raise ValueError('Start position of u is less than the start of r. r must span the entire chromosome')
+    
+    # check that chromosome size was specified by one of L, r, or u.
+    # if not specified, create them
+    # TODO L = r[-1][-2] for cum maps means type(L) is numpy.int64? does this matter?
+    if L is None: 
+        if type(u) is list:
+            L = u[-1][1]
+        # if both r and u are maps default to r for total size
+        if type(r) is list:
+            L = r[-1][-2] 
+        # if neither of the two previous statements were triggered. L is still None
+        if L is None:
+            raise ValueError("If u and r are constant values than the chrom. size, L, must be specified.")
+    # if L is specified make sure it matches the lengths given in r and/or u
+    elif isinstance(L, (int, float)):
+        if type(u) is list:
+            if u[-1][1] > L:
+                raise ValueError('There is positive mutation rate at locations greater than the provided L')
+        if type(r) is list:
+            if r[-1][-2] != L:
+                raise ValueError("Final position or r does not match the provided L. r must span the entire chromosome")
+    else:
+        raise ValueError('L must be None, int or float')
+                
+    # repeat with minPos
+    if minPos is None:
+        if type(u) is list:
+            minPos = u[0][0] 
+        # if both r and u are maps default to r for total size
+        if type(r) is list:
+            minPos = r[0][0]
+        # if neither of the two previous statements were triggered. L is still None
+        if minPos is None:
+            minPos = 0
+    # if L is specified make sure it matches the lengths given in r and/or u
+    elif isinstance(minPos, (int, float)):
+        if type(u) is list:
+            if u[0][0] < minPos:
+                raise ValueError('There is positive mutation rate at locations less than the provided minPos')
+        if type(r) is list:
+            if r[0][0] != minPos:
+                raise ValueError("start position or r does not match the provided minPos. r must span the entire chromosome")
+    else:
+        raise ValueError('minPos must be None, int or float')
+                
+    # simplify u map or convert constant rate to a map
+    if type(u) is list:
+        u = combine_and_split_regions(u)
+    else:
+        nregions = math.ceil((L - minPos)/targetSize)
+        regionSize = (L - minPos) / nregions
+        u = [[minPos + regionSize * i, minPos + regionSize * (i+1), u] for i in range(nregions)]      
+                
+    # check that ss is of the correct form
+    if type(ss) is not list:
+        raise ValueError("ss must a list of selection coefficients")
+    else:
+        if np.ndim(ss) != 1:
+            raise ValueError("ss must be a 1D list")
+        else:
+            if any([not isinstance(s, (int, float)) for s in ss]):
+                raise ValueError("ss must a list of int or float selection coefficients")
+
+    # if ps specified make sure it is of right form otherwise create it
+    if ps is None:
+        ps = [1 / len(ss)] * len(ss) 
+    elif type(ps) is list:
+        if np.ndim(ps) != 1:
+            raise ValueError('ps must be a 1D list')
+        if any([not isinstance(p, (int, float)) for p in ps]):
+            raise ValueError("ps must a list of probabilitie that a new mutation has selection coefficient given by ss")
+        if sum(ps) != 1:
+            raise ValueError('ps must sum to 1')
+        if len(ps) != len(ss):
+            raise ValueError('ps and ss must be the same length')
+    else: 
+        raise ValueError('ps must be None or a list of probabilities')
+    
+    # define position of point masses as center of each u region
+    positions = [(x + y)/2 for x,y,z in u]
+
+    # convert r to a cumulative interpolating function
+    if type(r) is float: 
+        r = [[minPos,L,r]]
+        r = make_cum_map(r)
+    elif type(r) is list:
+        r = make_cum_map(r, isCum)
+            
+    # ensure focalPos and tol are specified and numbers
+    if not isinstance(tol, (int, float)):
+        raise ValueError('tol must be float or int') 
+    if type(focal_positions) is not list:
+        if not isinstance(focal_positions[0], (int, float)):
+            raise ValueError('focal_positions must be a list of int or float')
+    
+
+   get_Bs(positions, u, ss, ps, r, focal_positions, tol)
+
+
+def B(scaledu, ss, ps, t, recDist):
+    return math.exp(sum([p * pointMassContribution(u, s, t, r) for u,r in zip(scaledu, recDist) for p,s in zip(ps, ss)]))
+
+def extend_b_range(b, t, ancTime):
+    tt = t 
+    if t > ancTime:
+        tt = ancTime
+    return(b(tt).tolist())
+
+def B_log_fast(scaledu, ss, ps, t, recDist):
+    U = np.asarray(scaledu, dtype=float)   # (M,)
+    R = np.asarray(recDist, dtype=float)   # (M,)
+    S = np.asarray(ss, dtype=float)        # (K,)
+    P = np.asarray(ps, dtype=float)        # (K,)
+
+    # contrib: (M,K)
+    contrib = pointMassContribution_np(U[:, None], S[None, :], t, R[:, None])
+
+    # sum_{m,k} p_k * contrib_{m,k}
+    # (contrib @ P) is (M,), then sum over M
+    return float((contrib @ P).sum())
+
+def B_fast(scaledu, ss, ps, t, recDist):
+    return float(np.exp(B_log_fast(scaledu, ss, ps, t, recDist)))
+
+def pointMassContribution(u, s, t, r):
+    return - u / s * (s / (r + s) * (1 - math.exp(- r * t - s * t)))**2
+
+def pointMassContribution_np(u, s, t, r):
+    # u, r: shape (M,1) ; s: shape (1,K) (or anything broadcastable)
+    u = np.asarray(u, dtype=float)
+    s = np.asarray(s, dtype=float)
+    r = np.asarray(r, dtype=float)
+    t = float(t)
+
+    denom = r + s
+    # avoid division-by-zero if r+s can be 0
+    frac = np.divide(s, denom, out=np.zeros_like(denom), where=(denom != 0.0))
+    
+    # x = np.asarray([0,1,2], dtype=float)[:,None]
+    # y = np.asarray([4,5,6,7], dtype=float)[None,:]    
+
+    # # [[a+b for a in y] for b in x]
+    # d = x + y
+    
+    # f = np.divide(y,d, out=np.zeros_like(d), where=(d != 0.0))
+    
+    # exp(-t(r+s)) with broadcasting
+    e = np.exp(-t * (r + s))
+    inner = frac * (1.0 - e)
+
+    # avoid division-by-zero if s can be 0
+    pref = np.divide(-u, s, out=np.zeros_like(inner), where=(s != 0.0))
+
+    return pref * (inner * inner)
+
+def getRecDist(pos,r,focalPos):
+    left = min(pos, focalPos)
+    right = max(pos, focalPos)
+    
+    bigR = r(right) - r(left)
+    return (1 - np.exp(- 2 * bigR)) / 2    
+
+def getRecDist_2(pos,r,focalPos):
+    bigR = abs(r(pos) - r(focalPos))
+    return (1 - np.exp(- 2 * bigR)) / 2
+
+def getRecDist_3(positions, r, focal_positions):
+    Rpos = r(positions)   # shape (M,)
+    Rfoc = r(focal_positions)   # shape (F,)
+    
+    bigR = np.abs(Rpos[None, :] - Rfoc[:, None])           # (F, M)
+    return 0.5 * (1.0 - np.exp(-2.0 * bigR))            # (F, M)
+
+
+fig, ax = plt.subplots(1, 1, figsize=(8, 4))
+ax.plot(np.arange(0,ancTime, 1),[B(scaledu, ss, ps, t, rd) for t in np.arange(0,ancTime,1)], "-", ms=8, lw=1, label="B(t)")
+ax.set_xlabel("Time in past")
+ax.set_ylabel("B(t)")
+ax.legend(); 
+
+def get_Bs(positions, u, ss, ps, r, focal_positions, tol, grid_pts = 100):
+    scaledu = [z * (y - x) for x,y,z in u]
+    
+    # startTime = datetime.now()
+    recDist = getRecDist_3(positions, r, focal_positions) # recDist[i, j] is distance between focal_positions[i] and positions[j]
+    # endTime = datetime.now()
+    # endTime - startTime
+        
+    all_bs = []
+    for i in range(len(focal_positions)):
+        rd = recDist[i]
+        fp = focal_positions[i]
+        
+        diff = 100
+        start = 1
+        j = 0
+        bvals = [1]
+        while(abs(diff) > tol):
+            end = B(scaledu, ss, ps, (j + 1) * 1e2, rd)
+            bvals.append(end)
+            diff = end - start
+            start = end
+            j += 1
+            
+        all_bs.append(bvals)
+            
+            
+
+    
+    b_funs = []
+    
+    startTime = datetime.now()
+
+    maxAncTime = 0
+    i = 0
+    for focalPos in focal_positions:    
+        recDist = [getRecDist_2(pos, r, focalPos) for pos in positions]
+           
+    endTime = datetime.now()
+    endTime - startTime
+    #     i+=1
+    #     print(i)
+        
+    #     diff = 100
+    #     start = 1
+    #     i = 0
+    #     while abs(diff) > tol:
+    #         end = B(scaledu, ss, ps, (i + 1) * 1e3, recDist)
+    #         diff = end - start
+    #         start = end
+    #         i += 1
+        
+    #     if 1e3 * i > maxAncTime:
+    #         maxAncTime = 1e3 * i
+    
+    # ancB = B(scaledu, ss, ps, ancTime, recDist)
+    
+    # ts = np.linspace(0, ancTime, grid_pts)
+    # bvals = [B(scaledu, ss, ps, t, recDist) for t in ts]
+    
+    # tmp_fun = interpolate.interp1d(ts, bvals)
+    # b_funs.append(lambda t: extend_b_range(tmp_fun, t, ancTime))
+    
+    
+
+                   
 
 def get_pred_loci(n_pos, r):
     loci = np.linspace(r[0][0], r[-1][-2], n_pos + 2)
