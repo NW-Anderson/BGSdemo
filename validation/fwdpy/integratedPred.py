@@ -12,6 +12,7 @@ from scipy import interpolate
 import warnings
 # from __future__ import annotations
 from typing import List
+from scipy.special import gamma, gammaincc, exp1
 
 os.chdir('/home/nathan/Documents/GitHub/BGSdemo/validation/fwdpy')
 from deme_funs import _get_demographic_events, _get_deme_sample_sizes, _get_root_Ne, _sizes_at_time, _migration_rate_in_interval, _compute_sfs, _reorder_fs
@@ -338,30 +339,47 @@ def pointMassContribution(u, s, t, r):
 def B(scaledu, ss, ps, t, recDist):
     return math.exp(sum([p * pointMassContribution(u, s, t, r) for u,r in zip(scaledu, recDist) for p,s in zip(ps, ss)]))
 
-def B_log_ext(scaledu, ss, ps, t, recDist, inner):
+def B_log_ext(scaledu, ss, ps, t, recDist):
     external = sum([p * pointMassContribution(u, s, t, r) for u,r in zip(scaledu, recDist) for p,s in zip(ps, ss)])
     return external
-def B_log_int(inner, focalPos, ss, ps, r):
+
+def B_log_int(inner, focalPos, ss, ps, r, t):
     ll = inner[0][0]
     lu = inner[0][1]
     u = inner[0][2]
     rbp = (r(lu) - r(ll)) / (lu - ll)
     
+    return sum([p* (internalContribution(s, u, lu-focalPos, t,rbp) + internalContribution(s, u, focalPos - ll, t, rbp)) for p,s in zip(ps,ss)])
+    
+def internalContribution(s, u, l, t, r): 
+    if t == 0:
+        return 0
+    elif t > 0:
+        return -(s*u*(l/(l*r*s + s**2) - (2*(s**(-1) - 1/(np.exp(l*r*t)*(l*r + s)) - np.exp(s*t)*t*inc_gamma(0, s*t) + np.exp(s*t)*t*inc_gamma(0, (l*r + s)*t)))/(np.exp(s*t)*r) + (s**(-1) - 1/(np.exp(2*l*r*t)*(l*r + s)) - 2*np.exp(2*s*t)*t*inc_gamma(0, 2*s*t) + 2*np.exp(2*s*t)*t*inc_gamma(0, 2*(l*r + s)*t))/(np.exp(2*s*t)*r)))
+    else:
+        raise ValueError('t must be positive in the scaling funciton')
+# Source - https://stackoverflow.com/a/52186952
+# Posted by MuellerSeb
+# Retrieved 2026-02-08, License - CC BY-SA 4.0
 
-    -(s*u*((lu - xf)/(lu*r*s + s^2 - r*s*xf) - (2*(s^(-1) - E^(r*t*(-lu + xf))/(lu*r + s - r*xf) - 
-       E^(s*t)*t*Gamma[0, s*t] + E^(s*t)*t*Gamma[0, t*(lu*r + s - r*xf)]))/(E^(s*t)*r) + 
-    (s^(-1) - E^(2*r*t*(-lu + xf))/(lu*r + s - r*xf) - 2*E^(2*s*t)*t*Gamma[0, 2*s*t] + 
-      2*E^(2*s*t)*t*Gamma[0, 2*t*(lu*r + s - r*xf)])/(E^(2*s*t)*r))) - 
- u*((-ll + xf)/(-(ll*r) + s + r*xf) - (2*s*(s^(-1) + E^(r*t*(ll - xf))/(ll*r - s - r*xf) - 
-      E^(s*t)*t*Gamma[0, s*t] + E^(s*t)*t*Gamma[0, t*(-(ll*r) + s + r*xf)]))/(E^(s*t)*r) + 
-   (s*(s^(-1) + E^(2*r*t*(ll - xf))/(ll*r - s - r*xf) - 2*E^(2*s*t)*t*Gamma[0, 2*s*t] + 
-      2*E^(2*s*t)*t*Gamma[0, 2*t*(-(ll*r) + s + r*xf)]))/(E^(2*s*t)*r))
+def inc_gamma(a, x):
+    return exp1(x) if a == 0 else gamma(a)*gammaincc(a, x)
 
 
-
+def B_2(scaledu, ss, ps, t, recDist, inner, focalPos, r):
+    ext = B_log_ext(scaledu, ss, ps, t, recDist)
+    internal = B_log_int(inner, focalPos, ss, ps, r, t)
+    return np.exp(ext + internal)
     
 def rescaledPointMassContribution(scaledu, s, t, r, ancestralNe, ancTime):
     return - scaledu / s * (s / (r + s) * (1 - math.exp(- r * (ancTime - t * 2 * ancestralNe) - s * (ancTime - t * 2 * ancestralNe))))**2
+
+def rescaled_B_2(scaledu, ss, ps, t, recDist, inner, focalPos, r, ancestralNe, ancTime):
+    tt = ancTime - 2 * ancestralNe * t
+    
+    ext = B_log_ext(scaledu, ss, ps, tt, recDist)
+    internal = B_log_int(inner, focalPos, ss, ps, r, tt)
+    return np.exp(ext + internal)
 
 def get_scaling_fun(positions, u, ss, ps, r, focalPos, censusSize, totalT, tol, grid_pts = 100):
     scaledu = [z * (y - x) for x,y,z in u]
@@ -405,14 +423,35 @@ def get_sclaing_fun_2(u, ss, ps, r, focalPos, censusSize, totalT, tol, grid_pts 
     positions = [(x + y)/2 for x,y,z in outer]
 
     recDist = [getRecDist(pos,r,focalPos) for pos in positions]    
+    
     diff = 100
     start = 1
     i = 0
     while abs(diff) > tol:
-        end = B_inner(scaledu, ss, ps, (i + 1) * censusSize / 10, recDist)
+        end = B_2(scaledu, ss, ps, (i + 1) * censusSize / 10, recDist, inner, focalPos, r) 
         diff = end - start
         start = end
         i += 1
+        
+    ancTime = censusSize / 10 * i
+    ancTime = max(ancTime, totalT * 2 * censusSize)
+    ancB = B(scaledu, ss, ps, ancTime, recDist)
+    ancNe = ancB * censusSize
+    
+    tmp_fun = lambda t: rescaled_B_2(scaledu, ss, ps, t, recDist, inner, focalPos, r, ancNe, ancTime) / ancB
+    
+    ts = np.linspace(0, ancTime / 2 / ancNe, grid_pts)
+    bs = [tmp_fun(t) for t in ts]
+    
+    tmp_fun = interpolate.interp1d(ts, bs)
+    def q_fun(t):
+        tt = t
+        if tt < 0:
+            tt = 0
+        elif tt > ancTime / 2 / ancNe:
+            tt = ancTime / 2 / ancNe
+        return [tmp_fun(tt).tolist()]
+    return(q_fun, ancTime, ancNe)
 # def get_scaling_fun(positions, u, ss, ps, r, focalPos, censusSize, totalT, tol):
 #     scaledu = [z * (y - x) for x,y,z in u]
 #     recDist = [getRecDist(pos, r, focalPos) for pos in positions]
