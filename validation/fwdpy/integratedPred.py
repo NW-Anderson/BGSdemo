@@ -338,6 +338,28 @@ def pointMassContribution(u, s, t, r):
 def B(scaledu, ss, ps, t, recDist):
     return math.exp(sum([p * pointMassContribution(u, s, t, r) for u,r in zip(scaledu, recDist) for p,s in zip(ps, ss)]))
 
+def B_log_ext(scaledu, ss, ps, t, recDist, inner):
+    external = sum([p * pointMassContribution(u, s, t, r) for u,r in zip(scaledu, recDist) for p,s in zip(ps, ss)])
+    return external
+def B_log_int(inner, focalPos, ss, ps, r):
+    ll = inner[0][0]
+    lu = inner[0][1]
+    u = inner[0][2]
+    rbp = (r(lu) - r(ll)) / (lu - ll)
+    
+
+    -(s*u*((lu - xf)/(lu*r*s + s^2 - r*s*xf) - (2*(s^(-1) - E^(r*t*(-lu + xf))/(lu*r + s - r*xf) - 
+       E^(s*t)*t*Gamma[0, s*t] + E^(s*t)*t*Gamma[0, t*(lu*r + s - r*xf)]))/(E^(s*t)*r) + 
+    (s^(-1) - E^(2*r*t*(-lu + xf))/(lu*r + s - r*xf) - 2*E^(2*s*t)*t*Gamma[0, 2*s*t] + 
+      2*E^(2*s*t)*t*Gamma[0, 2*t*(lu*r + s - r*xf)])/(E^(2*s*t)*r))) - 
+ u*((-ll + xf)/(-(ll*r) + s + r*xf) - (2*s*(s^(-1) + E^(r*t*(ll - xf))/(ll*r - s - r*xf) - 
+      E^(s*t)*t*Gamma[0, s*t] + E^(s*t)*t*Gamma[0, t*(-(ll*r) + s + r*xf)]))/(E^(s*t)*r) + 
+   (s*(s^(-1) + E^(2*r*t*(ll - xf))/(ll*r - s - r*xf) - 2*E^(2*s*t)*t*Gamma[0, 2*s*t] + 
+      2*E^(2*s*t)*t*Gamma[0, 2*t*(-(ll*r) + s + r*xf)]))/(E^(2*s*t)*r))
+
+
+
+    
 def rescaledPointMassContribution(scaledu, s, t, r, ancestralNe, ancTime):
     return - scaledu / s * (s / (r + s) * (1 - math.exp(- r * (ancTime - t * 2 * ancestralNe) - s * (ancTime - t * 2 * ancestralNe))))**2
 
@@ -374,6 +396,23 @@ def get_scaling_fun(positions, u, ss, ps, r, focalPos, censusSize, totalT, tol, 
         return [tmp_fun(tt).tolist()]
     return(q_fun, ancTime, ancNe)
 
+def get_sclaing_fun_2(u, ss, ps, r, focalPos, censusSize, totalT, tol, grid_pts = 100):
+    inner = [[x,y,z] for x,y,z in u if x <= focalPos and y >= focalPos]
+    outer = [[x,y,z] for x,y,z in u if x > focalPos or y < focalPos]
+    
+    scaledu = [z * (y - x) for x,y,z in outer]
+    # define position of point masses as center of each u region
+    positions = [(x + y)/2 for x,y,z in outer]
+
+    recDist = [getRecDist(pos,r,focalPos) for pos in positions]    
+    diff = 100
+    start = 1
+    i = 0
+    while abs(diff) > tol:
+        end = B_inner(scaledu, ss, ps, (i + 1) * censusSize / 10, recDist)
+        diff = end - start
+        start = end
+        i += 1
 # def get_scaling_fun(positions, u, ss, ps, r, focalPos, censusSize, totalT, tol):
 #     scaledu = [z * (y - x) for x,y,z in u]
 #     recDist = [getRecDist(pos, r, focalPos) for pos in positions]
@@ -1002,29 +1041,28 @@ def get_map_diffs(thing):
 
 # [cs(totalT), rescaledcs(ancTime / 2/ ancNe)]
 
-# fig, ax = plt.subplots(1, 1, figsize=(8, 4))
-# ax.plot(np.arange(0,ancTime / 2 / ancNe, 0.001),[f(t) for t in np.arange(0,ancTime / 2 / ancNe, 0.001)], "-", ms=8, lw=1, label="f(t)")
-# ax.set_xlabel("Time in past")
-# ax.set_ylabel("f(t)")
-# ax.legend();   
+fig, ax = plt.subplots(1, 1, figsize=(8, 4))
+ax.plot(np.arange(0,ancTime / 2 / ancNe, 0.001),[f(t) for t in np.arange(0,ancTime / 2 / ancNe, 0.001)], "-", ms=8, lw=1, label="f(t)")
+ax.set_xlabel("Time in past")
+ax.set_ylabel("f(t)")
+ax.legend();   
 
-# u = exonMutMap
-# r = recMap
-# focalPos = focalPos
-# sample_size = [sample_size]
-# ss = ss
-# sampled_demes=sampled_demes
-# g = demo  
+u = exonMutMap
+r = recMap
+focalPos = focalPos
+sample_size = [sample_size]
+ss = ss
+sampled_demes=sampled_demes
+g = demo  
 
-# cs = None
-# g = None
-# totalT = None
-# L = None
-# ps = None
-# targetSize = 1e4
-# tol = 1e-4
-# minPos = None
-# focal_s = None
+cs = None
+totalT = None
+L = None
+ps = None
+targetSize = 1e4
+tol = 1e-4
+minPos = None
+focal_s = None
                         
 def bgs_wrapper(u,
                 r,
