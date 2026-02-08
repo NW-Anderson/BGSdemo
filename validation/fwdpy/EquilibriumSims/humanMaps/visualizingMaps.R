@@ -12,7 +12,7 @@ names(exonMutMap) <- c("start", "stop", "rate")
 ggplot(exonMap) + 
   geom_point(aes(x = midPoint / 1e6,
                  y = size)) +
-  geom_vline(xintercept = 25409500/1e6)
+  geom_vline(xintercept = 49885518.61638361/1e6)
 
 exonMap <- exonMap %>% mutate(size = stop - start,
                               midPoint = (start + stop) / 2)
@@ -21,8 +21,8 @@ exonMap %>% filter(size == max(exonMap$size))
 ggplot(exonMap) + 
   geom_point(aes(x = midPoint,
                  y = size)) +
-  geom_vline(xintercept = 46313323) + 
-  coord_cartesian(xlim = c(46259941 + 1e6/2, 46259941 - 1e6/2))
+  geom_vline(xintercept = 49885518.61638361) + 
+  coord_cartesian(xlim = c(49885518.61638361 + 1e6/2, 49885518.61638361 - 1e6/2))
 
 tmp <- exonMutMap %>% filter(start >= 46256559 & stop <= 46263323) 
 tmp <- tmp %>% mutate(bigU = (stop - start) * rate)

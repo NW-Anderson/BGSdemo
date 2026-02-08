@@ -947,6 +947,30 @@ def discretize_deleterious_gamma_dfe_mean_shape(
 ######## integrated #########
 #############################   
 
+focalPos = 49885518.61638361
+demo = demes.load('ooa.yaml')
+sampled_demes = ['CEU']
+u = exonMutMap
+r = recMap
+ss = ss
+
+cs = None
+g = demo
+totalT = None
+L = None
+ps = None
+targetSize = 1e4
+tol = 1e-4
+minPos = None
+focal_s = None
+
+fig, ax = plt.subplots(1, 1, figsize=(8, 4))
+ax.plot(np.arange(0,ancTime / 2 / ancNe, 0.001),[f(t) for t in np.arange(0,ancTime / 2 / ancNe, 0.001)], "-", ms=8, lw=1, label="B(t)")
+ax.set_xlabel("Time in past")
+ax.set_ylabel("B(t)")
+ax.legend();       
+
+
 def bgs_wrapper(u,
                 r,
                 focalPos,
@@ -1207,16 +1231,16 @@ def bgs_wrapper(u,
     else:
         raise ValueError('cs or g must be specified.')
 
-u = exonMutMap
-r = recMap
-focal_positions = focal_positions
-ss = ss
+# u = exonMutMap
+# r = recMap
+# focal_positions = focal_positions
+# ss = ss
 
-L = None
-ps = None
-targetSize = 1e4
-tol = 1e-4
-minPos = None
+# L = None
+# ps = None
+# targetSize = 1e4
+# tol = 1e-4
+# minPos = None
 
 def cluster_scale_funs(u,
                 r,
@@ -1365,12 +1389,16 @@ def cluster_scale_funs(u,
             raise ValueError('focal_positions must be a list of int or float')
     
 
-   get_Bs(positions, u, ss, ps, r, focal_positions, tol)
+    get_Bs(positions, u, ss, ps, r, focal_positions, tol)
 
 
 def B(scaledu, ss, ps, t, recDist):
     return math.exp(sum([p * pointMassContribution(u, s, t, r) for u,r in zip(scaledu, recDist) for p,s in zip(ps, ss)]))
 
+test = [p * pointMassContribution(u, s, t, r) for u,r in zip(scaledu, recDist) for p,s in zip(ps, ss)]
+math.exp(sum(test))
+[[p * pointMassContribution(u, s, t, r), s] for u,r in zip(scaledu, recDist) for p,s in zip(ps, ss)]
+                                                         
 def extend_b_range(b, t, ancTime):
     tt = t 
     if t > ancTime:
@@ -1392,6 +1420,35 @@ def B_log_fast(scaledu, ss, ps, t, recDist):
 
 def B_fast(scaledu, ss, ps, t, recDist):
     return float(np.exp(B_log_fast(scaledu, ss, ps, t, recDist)))
+
+def B_log_stream(U, S, P, t, R):
+    """
+    U: (M,)
+    S: (K,)
+    P: (K,)
+    R: (M,)  recDist for one focal position
+    returns scalar logB
+    """
+    # R = np.asarray(R, dtype=float)           # (M,) (already is, ideally)
+    t = float(t)
+
+    logB = 0.0
+    for s, p in zip(S, P):
+        denom = R + s                        # (M,)
+        # g = 1 - exp(-t*denom) computed stably
+        g = -np.expm1(-t * denom)            # (M,)
+
+        # term_m = -U * s * (g/denom)^2
+        # compute (g/denom) safely
+        q = np.divide(g, denom, out=np.zeros_like(denom), where=(denom != 0.0))
+        term = -U * s * (q * q)              # (M,)
+
+        logB += p * term.sum()
+
+    return logB
+
+def B_fast_stream(U, S, P, t, R):
+    return float(np.exp(B_log_stream(U, S, P, t, R)))
 
 def pointMassContribution(u, s, t, r):
     return - u / s * (s / (r + s) * (1 - math.exp(- r * t - s * t)))**2
@@ -1443,8 +1500,44 @@ def getRecDist_3(positions, r, focal_positions):
     return 0.5 * (1.0 - np.exp(-2.0 * bigR))            # (F, M)
 
 
+
+
+def make_B_evaluator_for_focal(recDist_i,S_row, U_col, P_row):
+    R = np.asarray(recDist_i, dtype=np.float64)[:, None]   # (M,1)
+
+    D = R + S_row                                   # (M,K), constant in t
+
+    # W = (-u*s / D^2) * p  (all t-independent, includes p)
+    invD = np.divide(1.0, D, out=np.zeros_like(D), where=(D != 0.0))
+    W = (-U_col) * S_row * (invD * invD) * P_row
+
+    # reusable temp arrays to avoid reallocations each time
+    E = np.empty_like(D)   # exp(-t*D)
+    G = np.empty_like(D)   # 1 - exp(-t*D)
+
+    def B_log_at_t(t):
+        # E = exp(-t*D)
+        np.multiply(D, -t, out=E)
+        np.exp(E, out=E)
+
+        # G = 1 - E
+        np.subtract(1.0, E, out=G)
+
+        # logB = sum(W * G^2)
+        np.multiply(G, G, out=G)         # G = G^2 in-place
+        return float(np.sum(W * G))
+
+    return B_log_at_t
+
+
 fig, ax = plt.subplots(1, 1, figsize=(8, 4))
-ax.plot(np.arange(0,ancTime, 1),[B(scaledu, ss, ps, t, rd) for t in np.arange(0,ancTime,1)], "-", ms=8, lw=1, label="B(t)")
+ax.plot(np.arange(0,ancTime, 1000),[B(scaledu, ss, ps, t, rd) for t in np.arange(0,ancTime,1000)], "-", ms=8, lw=1, label="B(t)")
+ax.set_xlabel("Time in past")
+ax.set_ylabel("B(t)")
+ax.legend(); 
+
+fig, ax = plt.subplots(1, 1, figsize=(8, 4))
+ax.plot(np.arange(0,totalgen, 100),[B(scaledu, ss, ps, t, rd) for t in np.arange(0,totalgen,100)], "-", ms=8, lw=1, label="B(t)")
 ax.set_xlabel("Time in past")
 ax.set_ylabel("B(t)")
 ax.legend(); 
@@ -1456,7 +1549,48 @@ def get_Bs(positions, u, ss, ps, r, focal_positions, tol, grid_pts = 100):
     recDist = getRecDist_3(positions, r, focal_positions) # recDist[i, j] is distance between focal_positions[i] and positions[j]
     # endTime = datetime.now()
     # endTime - startTime
+    
+    startTime = datetime.now()
+    U = np.asarray(scaledu, dtype=np.float64)          # (M,)
+    S = np.asarray(ss, dtype=np.float64)              # (K,)
+    P = np.asarray(ps, dtype=np.float64)              # (K,)
+
+    S_row = S[None, :]                                 # (1,K)
+    U_col = U[:, None]                                 # (M,1)
+    P_row = P[None, :]                                 # (1,K)
+
+    all_bs = []
+    dt = 1e3
+    
+    for i in range(len(focal_positions)):
+        B_log_at_t = make_B_evaluator_for_focal(recDist[i], S_row, U_col, P_row)
+    
+        prev_logB = 0.0
+        j = 0
+        bvals = [1.0]
         
+        found = False
+    
+        while True:
+            j += 1
+            t = j * dt
+            logB = B_log_at_t(t)
+            bvals.append(float(np.exp(logB)))
+            
+            if float(np.exp(logB)) < 1e-5:
+                found = True
+                break
+    
+            if abs(np.exp(logB)-np.exp(prev_logB)) <= tol:   
+                break
+            prev_logB = logB
+        if found:
+            break
+        all_bs.append(bvals)
+    endTime = datetime.now()
+    endTime - startTime
+    
+    startTime = datetime.now()
     all_bs = []
     for i in range(len(focal_positions)):
         rd = recDist[i]
@@ -1467,28 +1601,62 @@ def get_Bs(positions, u, ss, ps, r, focal_positions, tol, grid_pts = 100):
         j = 0
         bvals = [1]
         while(abs(diff) > tol):
-            end = B(scaledu, ss, ps, (j + 1) * 1e2, rd)
+            end = B_fast(scaledu, ss, ps, (j + 1) * 1e3, rd)
             bvals.append(end)
             diff = end - start
             start = end
             j += 1
             
         all_bs.append(bvals)
-            
-            
-
-    
-    b_funs = []
-    
-    startTime = datetime.now()
-
-    maxAncTime = 0
-    i = 0
-    for focalPos in focal_positions:    
-        recDist = [getRecDist_2(pos, r, focalPos) for pos in positions]
-           
+        
     endTime = datetime.now()
     endTime - startTime
+    
+    # startTime = datetime.now()
+    # # Preconvert once (outside everything)
+    # U = np.asarray(scaledu, dtype=float)         # (M,)
+    # S = np.asarray(ss, dtype=float)              # (K,)
+    # P = np.asarray(ps, dtype=float)              # (K,)
+            
+
+    # all_bs = []
+    # dt = 1e3
+    
+    # for i in range(len(focal_positions)):
+    #     R = recDist[i]                 # should already be a NumPy array (M,)
+    
+    #     prev_logB = 0.0
+    #     j = 0
+    #     bvals = [1.0]
+    
+    #     while True:
+    #         j += 1
+    #         t = j * dt
+    
+    #         logB = B_log_stream(U, S, P, t, R)
+    #         bvals.append(float(np.exp(logB)))
+    
+    #         if abs(logB - prev_logB) <= tol:     # tol now applies to logB
+    #             break
+    #         prev_logB = logB
+    
+    #     all_bs.append(bvals)
+    # endTime = datetime.now()
+    # endTime - startTime
+    
+
+    
+    # b_funs = []
+    
+    # startTime = datetime.now()
+
+    # maxAncTime = 0
+    # i = 0
+    # for focalPos in focal_positions:    
+    #     recDist = [getRecDist_2(pos, r, focalPos) for pos in positions]
+           
+    # endTime = datetime.now()
+    # endTime - startTime
     #     i+=1
     #     print(i)
         
@@ -1545,15 +1713,56 @@ nbins = 10
 dfe = discretize_deleterious_gamma_dfe_mean_shape(mean, shape, nbins)
 ss = [y for x,y in dfe]
 
-demo = demes.load('ooa.yaml')
 
-# fs, ancNe = bgs_wrapper(u = exonMutMap,
-#                         r = recMap,
-#                         focalPos = focalPos,
-#                         sample_size = [sample_size],
-#                         ss = ss,
-#                         sampled_demes=sampled_demes,
-#                         g = demo)
+cluster_scale_funs(u = exonMutMap,
+                    r = recMap,
+                    focal_positions = focal_positions,
+                    ss = ss)
+
+
+
+focalPos = 49885518.61638361
+demo = demes.load('ooa.yaml')
+sampled_demes = ['CEU']
+u = exonMutMap
+r = recMap
+focal_positions = focal_positions
+ss = ss
+sample_size = 40
+
+[[x,y] for x,y in exonMap if x < focalPos and y > focalPos]
+u = [[x,y,z] for x,y,z in u if x <= 49887179 and y >= 49883661]
+
+fs, ancNe = bgs_wrapper(u = u,
+                        r = recMap,
+                        focalPos = focalPos,
+                        sample_size = [sample_size],
+                        ss = ss,
+                        sampled_demes=sampled_demes,
+                        g = demo)
+
+fs_neu = moments.Spectrum.from_demes(
+    demo, 
+    sampled_demes=sampled_demes, 
+    sample_sizes=[sample_size]
+)
+
+oldestEpoch, ancCensusSize = getOldestEpoch(demo)
+fs = fs * 8 * 1e-8 * ancNe
+fs_neu = fs_neu * 8 * 1e-8 * ancCensusSize    
+
+
+fig, ax = plt.subplots(1, 1, figsize=(16, 8), sharex=True, sharey=False)
+fig.text(0.5, 0.04, 'Allele Frequency', ha='center')
+fig.text(0.04, 0.5, 'Count', va='center', rotation='vertical')
+fig.subplots_adjust(hspace = .25)
+fig.suptitle(str(focalPos))
+ax.plot(fs, "-", ms=8, lw=1, label="BGS")
+ax.plot(fs_neu, "-", ms=8, lw=1, label="SNM")
+ax.set_title("nbins = " + str(nbins)) 
+ax.set_yscale('log')
+ax.annotate("B=" + str(round(fs.pi()/fs_neu.pi(),3)),xy=(sample_size / 10, max(fs[1:-1]) * 0.8),size="x-large")
+ax.legend();
 
 #############
 # OOA Gamma #
@@ -1628,15 +1837,15 @@ def get_max_positions(recMap, mutMap):
 # representative = 'conditional_mean'
 
 
-windows = get_windows(recMap, mutMap)
-focal_positions = get_focal_pos(windows)
-# import random
-# focalPos = random.sample(focal_positions, 1)[0]
-chosen = [pos for i, pos in enumerate(focal_positions) if (i + 1) % 10 == 0 ]
-sample_size = 40
-sampled_demes = ['CEU']
-demo = demes.load('ooa.yaml')
-os.chdir('/media/nathan/T7/BGSdemo/gammaOOAData')
+# windows = get_windows(recMap, mutMap)
+# focal_positions = get_focal_pos(windows)
+# # import random
+# # focalPos = random.sample(focal_positions, 1)[0]
+# chosen = [pos for i, pos in enumerate(focal_positions) if (i + 1) % 10 == 0 ]
+# sample_size = 40
+# sampled_demes = ['CEU']
+# demo = demes.load('ooa.yaml')
+# os.chdir('/media/nathan/T7/BGSdemo/gammaOOAData')
 
 # focalPos = chosen[0]
 # focalIndex = [i for i,x in enumerate(focal_positions) if x == focalPos][0]
