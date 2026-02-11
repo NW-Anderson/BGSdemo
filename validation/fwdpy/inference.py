@@ -1388,66 +1388,7 @@ def cluster_scale_funs(u,
 
     get_Bs(u, ss, ps, r, focal_positions, tol)
 
-
-def B(scaledu, ss, ps, t, recDist):
-    return math.exp(sum([p * pointMassContribution(u, s, t, r) for u,r in zip(scaledu, recDist) for p,s in zip(ps, ss)]))
-
-test = [p * pointMassContribution(u, s, t, r) for u,r in zip(scaledu, recDist) for p,s in zip(ps, ss)]
-math.exp(sum(test))
-[[p * pointMassContribution(u, s, t, r), s] for u,r in zip(scaledu, recDist) for p,s in zip(ps, ss)]
-                                                         
-def extend_b_range(b, t, ancTime):
-    tt = t 
-    if t > ancTime:
-        tt = ancTime
-    return(b(tt).tolist())
-
-def B_log_fast(scaledu, ss, ps, t, recDist):
-    U = np.asarray(scaledu, dtype=float)   # (M,)
-    R = np.asarray(recDist, dtype=float)   # (M,)
-    S = np.asarray(ss, dtype=float)        # (K,)
-    P = np.asarray(ps, dtype=float)        # (K,)
-
-    # contrib: (M,K)
-    contrib = pointMassContribution_np(U[:, None], S[None, :], t, R[:, None])
-
-    # sum_{m,k} p_k * contrib_{m,k}
-    # (contrib @ P) is (M,), then sum over M
-    return float((contrib @ P).sum())
-
-def B_fast(scaledu, ss, ps, t, recDist):
-    return float(np.exp(B_log_fast(scaledu, ss, ps, t, recDist)))
-
-def pointMassContribution(u, s, t, r):
-    return - u / s * (s / (r + s) * (1 - math.exp(- r * t - s * t)))**2
-
-def pointMassContribution_np(u, s, t, r):
-    # u, r: shape (M,1) ; s: shape (1,K) (or anything broadcastable)
-    u = np.asarray(u, dtype=float)
-    s = np.asarray(s, dtype=float)
-    r = np.asarray(r, dtype=float)
-    t = float(t)
-
-    denom = r + s
-    # avoid division-by-zero if r+s can be 0
-    frac = np.divide(s, denom, out=np.zeros_like(denom), where=(denom != 0.0))
-    
-    # x = np.asarray([0,1,2], dtype=float)[:,None]
-    # y = np.asarray([4,5,6,7], dtype=float)[None,:]    
-
-    # # [[a+b for a in y] for b in x]
-    # d = x + y
-    
-    # f = np.divide(y,d, out=np.zeros_like(d), where=(d != 0.0))
-    
-    # exp(-t(r+s)) with broadcasting
-    e = np.exp(-t * (r + s))
-    inner = frac * (1.0 - e)
-
-    # avoid division-by-zero if s can be 0
-    pref = np.divide(-u, s, out=np.zeros_like(inner), where=(s != 0.0))
-
-    return pref * (inner * inner)
+                                                      
 
 def getRecDist_3(positions, r, focal_positions):
     Rpos = r(positions)   # shape (M,)
@@ -1456,42 +1397,12 @@ def getRecDist_3(positions, r, focal_positions):
     bigR = np.abs(Rpos[None, :] - Rfoc[:, None])           # (F, M)
     return 0.5 * (1.0 - np.exp(-2.0 * bigR))            # (F, M)
 
-def B_log_ext(scaledu, ss, ps, t, recDist):
-    external = sum([p * pointMassContribution(u, s, t, r) for u,r in zip(scaledu, recDist) for p,s in zip(ps, ss)])
-    return external
-
-def B_log_int(inner, focalPos, ss, ps, r, t):
-    ll = inner[0][0]
-    lu = inner[0][1]
-    u = inner[0][2]
-    rbp = (r(lu) - r(ll)) / (lu - ll)
-    
-    return sum([p* (internalContribution(s, u, lu-focalPos, t,rbp) + internalContribution(s, u, focalPos - ll, t, rbp)) for p,s in zip(ps,ss)])
-
-def internalContribution(s, u, l, t, r): 
-    if t == 0:
-        return 0
-    elif t > 0:
-        return (u*((-(l*r) + s*np.exp(-2*(l*r + s)*t) - (2*s)*np.exp(-(l*r + s)*t) - (l*r + s)*np.exp(-2*s*t) + (2*(l*r + s))*np.exp(-s*t))/(l*r + s) - 2*s*t*inc_gamma(0, s*t) + 2*s*t*inc_gamma(0, 2*s*t) + 2*s*t*(inc_gamma(0, (l*r + s)*t) - inc_gamma(0, 2*(l*r + s)*t))))/r
-    else:
-        raise ValueError('t must be positive in the scaling funciton')
 
 # exon_contains_focal_log(ss, ps, MU[j], LL[j], LU[j], fp, r_func, t)
 # u = MU[j]
 # ll = LL[j]
 # lu = LU[j]
 # focalPos = fp
-
-def exon_contains_focal_log(ss, ps, u, ll, lu, focalPos, r_func, t):
-    if t <= 0:
-        return 0.0
-    rbp = (r_func(lu) - r_func(ll)) / (lu - ll)
-    lL = focalPos - ll
-    lR = lu - focalPos
-    s = np.asarray(ss, np.float64)
-    p = np.asarray(ps, np.float64)
-    contrib = internal_containing_vec(s, u, lL, t, rbp) + internal_containing_vec(s, u, lR, t, rbp)
-    return float(np.sum(p * contrib))
 
 def internal_containing_vec(s, u, l, t, r):
     """
@@ -1518,38 +1429,8 @@ def internal_containing_vec(s, u, l, t, r):
     e2_lr_s = np.exp(-2.0 * (lr + s) * t)
     e_s     = np.exp(-s * t)
     e2_s    = np.exp(-2.0 * s * t)
-
-    st = s * t
-    x1 = st
-    x2 = 2.0 * st
-    x3 = (lr + s) * t
-    x4 = 2.0 * (lr + s) * t
-
-    term = (-(lr) + s * e2_lr_s - 2.0 * s * e_lr_s
-            - (lr + s) * e2_s + 2.0 * (lr + s) * e_s) / denom
-
-    term += (-2.0 * s * t * G0(x1)
-             + 2.0 * s * t * G0(x2)
-             + 2.0 * s * t * (G0(x3) - G0(x4)))
-
-    return (u * term) / r
-
-
-def internal_containing_vec(s, u, l, t, r):
-
-    # ---- Exponential pieces ----
-    # These correspond exactly to the exp(...) calls in your scalar expression.
-    # Each is an array of length K, one value per s-bin.
-    e_lr_s   = np.exp(-(lr + s) * t)          # exp(-(lr+s)t)
-    e2_lr_s  = np.exp(-2.0 * (lr + s) * t)    # exp(-2(lr+s)t)
-    e_s      = np.exp(-s * t)                 # exp(-s t)
-    e2_s     = np.exp(-2.0 * s * t)           # exp(-2 s t)
-
+    
     # ---- Rational/exponential bracket A(s)/(lr+s) ----
-    # This block implements:
-    #   (-(lr) + s*e^{-2(lr+s)t} - 2s*e^{-(lr+s)t} - (lr+s)e^{-2st} + 2(lr+s)e^{-st}) / (lr+s)
-    #
-    # This is the first big fraction inside your u*( ... ) term.
     frac_term = (-(lr)
                  + s * e2_lr_s
                  - 2.0 * s * e_lr_s
@@ -1557,90 +1438,19 @@ def internal_containing_vec(s, u, l, t, r):
                  + 2.0 * (lr + s) * e_s) / denom
 
     # ---- Γ(0, x) terms (upper incomplete gamma at a=0) ----
-    # Your helper inc_gamma(0, x) equals exp1(x).
-    # We evaluate the four arguments used in your expression:
-    #   x1 = s*t
-    #   x2 = 2*s*t
-    #   x3 = (lr+s)*t
-    #   x4 = 2*(lr+s)*t
-    #
-    # and add the combination:
-    #   -2*s*t*Γ(0,x1) + 2*s*t*Γ(0,x2) + 2*s*t*(Γ(0,x3) - Γ(0,x4))
+    #  inc_gamma(0, x) equals exp1(x).
     st = s * t
     x1 = st
     x2 = 2.0 * st
     x3 = (lr + s) * t
     x4 = 2.0 * (lr + s) * t
 
-    gamma_combo = (-2.0 * s * t * exp1(x1)
+
+    gamma_term = (-2.0 * s * t * exp1(x1)
                    + 2.0 * s * t * exp1(x2)
                    + 2.0 * s * t * (exp1(x3) - exp1(x4)))
 
-    # ---- Assemble the full bracket and scale by u/r ----
-    # This matches:
-    #   (u/r) * [ frac_term + gamma_combo ]
-    # returning an array of length K (one contribution per s-bin).
-    return (u * (frac_term + gamma_combo)) / r
-
-
-def exon_contains_focal_log(ss, ps, u_exon, ll, lu, focalPos, r_func, t):
-    """
-    Log-contribution for an exon [ll, lu] that CONTAINS the focal site.
-
-    Mathematical idea:
-      - Treat recombination within the exon as linear in physical distance:
-            r(x) ≈ r(ll) + rbp*(x-ll),   where rbp = (r(lu)-r(ll))/(lu-ll)
-      - Split the exon at the focal position into left and right segments of lengths:
-            lL = focalPos - ll
-            lR = lu - focalPos
-      - The exon’s integrated contribution is the sum of the two one-sided integrals,
-        each given by internal_containing_vec(s, u_exon, l, t, rbp).
-      - Then average over the discrete DFE:
-            sum_k p_k * [I(s_k; lL) + I(s_k; lR)]
-    """
-    s = np.asarray(ss, dtype=np.float64)
-    p = np.asarray(ps, dtype=np.float64)
-
-    # Local recombination-per-bp inside this exon (linear approximation)
-    rbp = (r_func(lu) - r_func(ll)) / (lu - ll)
-
-    # Distances from focal to the two exon endpoints (bp)
-    lL = focalPos - ll
-    lR = lu - focalPos
-
-    # Vector of per-s contributions for left and right pieces
-    left  = internal_containing_vec(s, u_exon, lL, t, rbp)
-    right = internal_containing_vec(s, u_exon, lR, t, rbp)
-
-    # DFE-weighted sum over bins -> scalar log-contribution for this exon
-    return float(np.sum(p * (left + right)))
-
-
-def exon_nearby_log_with_r0(ss, ps, u_exon, lb, ub, rbp, r0, t):
-    """
-    Log-contribution for a NEARBY exon that does NOT contain the focal site, using your corrected formula.
-
-    Parameters:
-      lb: bp distance from focal to the nearer exon boundary
-      ub: bp distance from focal to the farther exon boundary  (ub >= lb)
-      rbp: local recombination per bp within the exon (linear approx on the exon)
-      r0: recombination distance from focal to the NEAR boundary (in map units, i.e. |r(near)-r(focal)|)
-      u_exon: exon "u" (your integrated weight for the exon; if you intend u=(len*mu) this matches your scaledu construction)
-      ss, ps: DFE bins and weights
-
-    Mathematical note:
-      Your Mathematica expression is a closed-form evaluation of the interval integral for a segment that lies
-      entirely on one side of the focal, but with an offset r0 accounting for recombination distance from focal
-      to the near boundary. It is evaluated per s-bin, then weighted by p and summed.
-    """
-    s = np.asarray(ss, dtype=np.float64)
-    p = np.asarray(ps, dtype=np.float64)
-
-    # Define the two "effective rates" that appear repeatedly:
-    #   a = lb*rbp + r0 + s
-    #   b = r0 + s + ub*rbp
-    # These are the (recomb+selection) terms at the near and far endpoints, including the offset r0.
-    a = lb * rbp + r0 + s*
+    return (u * (frac_term + gamma_term)) / r
 
 
 # Source - https://stackoverflow.com/a/52186952
@@ -1651,41 +1461,6 @@ def inc_gamma(a, x):
     return exp1(x) if a == 0 else gamma(a)*gammaincc(a, x)
 
 
-def B_2(scaledu, ss, ps, t, recDist, inner, focalPos, r):
-    ext = B_log_ext(scaledu, ss, ps, t, recDist)
-    if len(inner) == 0:
-        return np.exp(ext)
-    internal = B_log_int(inner, focalPos, ss, ps, r, t)
-    return np.exp(ext + internal) 
-   
-
-
-def make_B_evaluator_for_focal(recDist_i,S_row, U_col, P_row):
-    R = np.asarray(recDist_i, dtype=np.float64)[:, None]   # (M,1)
-
-    D = R + S_row                                   # (M,K), constant in t
-
-    # W = (-u*s / D^2) * p  (all t-independent, includes p)
-    invD = np.divide(1.0, D, out=np.zeros_like(D), where=(D != 0.0))
-    W = (-U_col) * S_row * (invD * invD) * P_row
-
-    # reusable temp arrays to avoid reallocations each time
-    E = np.empty_like(D)   # exp(-t*D)
-    G = np.empty_like(D)   # 1 - exp(-t*D)
-
-    def B_log_at_t(t):
-        # E = exp(-t*D)
-        np.multiply(D, -t, out=E)
-        np.exp(E, out=E)
-
-        # G = 1 - E
-        np.subtract(1.0, E, out=G)
-
-        # logB = sum(W * G^2)
-        np.multiply(G, G, out=G)         # G = G^2 in-place
-        return float(np.sum(W * G))
-
-    return B_log_at_t
 
 def make_external_logB_evaluator(recDist_i, scaledu, ss, ps, ext_mask):
     U = np.asarray(scaledu, np.float64)[ext_mask][:, None]   # (Mext,1)
@@ -1727,56 +1502,28 @@ ax.set_xlabel("Time in past")
 ax.set_ylabel("B(t)")
 ax.legend(); 
 
-def get_scaling_fun_2(u, ss, ps, r, focalPos, censusSize, totalT, tol, grid_pts = 100):
-    inner = [[x,y,z] for x,y,z in u if x <= focalPos and y >= focalPos]
-    outer = [[x,y,z] for x,y,z in u if x > focalPos or y < focalPos]
-    if len(inner) == 2:
-        inner = combine_and_split_regions(inner, targetSize=(inner[-1][1] - inner[0][0] + 1))
-    elif len(inner) > 2:
-        raise ValueError('woah, there partner!')
+
+def exon_contains_focal_log(ss, ps, u, ll, lu, focalPos, rbp, t):
+    """
+    Log-contribution for an exon [ll, lu] that CONTAINS the focal site.
+    """
+    if t <= 0:
+        return 0.0
     
-    scaledu = [z * (y - x) for x,y,z in outer]
-    # define position of point masses as center of each u region
-    positions = [(x + y)/2 for x,y,z in outer]
-
-    recDist = [getRecDist(pos,r,focalPos) for pos in positions]    
+    # Local recombination-per-bp inside this exon
+    rbp = (r_func(lu) - r_func(ll)) / (lu - ll) #TODO computing this twice
+    # distance to endpoints
+    lL = focalPos - ll
+    lR = lu - focalPos
     
-    diff = 100
-    start = 1
-    i = 0
-    while abs(diff) > tol:
-        end = B_2(scaledu, ss, ps, (i + 1) * censusSize / 10, recDist, inner, focalPos, r) 
-        diff = end - start
-        start = end
-        i += 1
-        
-    ancTime = censusSize / 10 * i
-    ancTime = max(ancTime, totalT * 2 * censusSize)
-    ancB = B_2(scaledu, ss, ps, ancTime, recDist, inner, focalPos, r)
-    ancNe = ancB * censusSize
+    s = np.asarray(ss, np.float64) # TODO computing this twice
+    p = np.asarray(ps, np.float64)
     
-    tmp_fun = lambda t: rescaled_B_2(scaledu, ss, ps, t, recDist, inner, focalPos, r, ancNe, ancTime) / ancB
-    
-    ts = np.linspace(0, ancTime / 2 / ancNe, grid_pts)
-    bs = [tmp_fun(t) for t in ts]
-    
-    tmp_fun = interpolate.interp1d(ts, bs)
-    def q_fun(t):
-        tt = t
-        if tt < 0:
-            tt = 0
-        elif tt > ancTime / 2 / ancNe:
-            tt = ancTime / 2 / ancNe
-        return [tmp_fun(tt).tolist()]
-    return(q_fun, ancTime, ancNe)
+    contrib = internal_containing_vec(s, u, lL, t, rbp) + internal_containing_vec(s, u, lR, t, rbp)
+    return float(np.sum(p * contrib))
 
 
-
-
-
-
-
-def get_Bs(u, ss, ps, r, focal_positions, tol, grid_pts = 100):
+def get_Bs(u, ss, ps, r_func, focal_positions, tol, grid_pts = 100):
     ex = np.asarray(u, dtype=np.float64)   # (E,3)
     LL = ex[:,0]                               # (E,) start positions
     LU = ex[:,1]                               # (E,) end positions
@@ -1791,7 +1538,7 @@ def get_Bs(u, ss, ps, r, focal_positions, tol, grid_pts = 100):
     RB  = (RLU - RLL) / (LU - LL)              # (E,) recomb per bp within exon
         
     # startTime = datetime.now()
-    recDist = getRecDist_3(positions, r, focal_positions) # recDist[i, j] is distance between focal_positions[i] and positions[j]
+    recDist = getRecDist_3(positions, r_func, focal_positions) # recDist[i, j] is distance between focal_positions[i] and positions[j]
     # endTime = datetime.now()
     # endTime - startTime
     
@@ -1801,50 +1548,96 @@ def get_Bs(u, ss, ps, r, focal_positions, tol, grid_pts = 100):
     dt = 1e3
     
     for i,fp in enumerate(len(focal_positions)):
-        B_log_at_t = make_B_log_evaluator_3case(recDist_i = recDist[i],  # tODO change to from_aligned?
-                                                positions = positions, 
-                                                scaledu = scaledu, 
-                                                exons = u, 
-                                                focalPos = fp, 
-                                                r_func = r, 
+        B_log_at_t = make_B_log_evaluator_3case(recDist_i = recDist[i],  
+                                                fp = fp,
+                                                R_cutoff = 0.01,
                                                 ss = ss, 
                                                 ps = ps, 
-                                                R_cutoff = 0.01)
+                                                LL,
+                                                LU,
+                                                MU,
+                                                RB,)
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                # positions = positions, 
+                                                # scaledu = scaledu, 
+                                                # exons = u, 
+                                                # focalPos = fp, 
+                                                # r_func = r, 
+                                                
 
+def make_B_log_evaluator_3case(
+    recDist_i, fp, R_cutoff, ss, ps, LL, LU, MU, RLL, RLU, RB,
+):
+    # creating masks
+    contains = (LL <= fp) & (fp <= LU) #TODO deal with length >1 edge-case
+    nearby = (~contains) & (recDist_i <= R_cutoff)
+    external = (~contains) & (~nearby)
+    
+    r0 = np.minimum(np.abs(RLL - rf), np.abs(RLU - rf))
+    
+    # preparing lambda function for far away exons
+    ext_logB = make_external_logB_evaluator(recDist_i, scaledu, ss, ps, external)
 
-    all_bs = []
-    dt = 1e3
+    # indices to evaluate over:
+    idx_contains = np.nonzero(contains)[0]      # length 0 or 1
+    idx_nearby   = np.nonzero(nearby)[0]        # typically small
+
+    def logB(t):
+        # Case A: far away
+        total = ext_logB(t)
+
+        # Case B: containing exon
+        for j in idx_contains:
+            total += exon_contains_focal_log(ss, ps, MU[j], LL[j], LU[j], fp, RB[j], t)
+
+        # Case C: nearby non-containing exons
+        for j in idx_nearby:
+            dLL = abs(fp - LL[j])
+            dLU = abs(fp - LU[j])
+            lb = dLL if dLL < dLU else dLU
+            ub = dLU if dLL < dLU else dLL
+            total += exon_nearby_log_with_r0(ss, ps, MU[j], lb, ub, RB[j], r0[j], t)
+
+        return total
+
+    return logB
+    # all_bs = []
+    # dt = 1e3
     
-    for i,fp in enumerate(len(focal_positions)):
+    # for i,fp in enumerate(len(focal_positions)):
         
         
         
-        B_log_at_t = make_B_evaluator_for_focal(recDist[i], S_row, U_col, P_row) 
+    #     B_log_at_t = make_B_evaluator_for_focal(recDist[i], S_row, U_col, P_row) 
     
-        prev_logB = 0.0
-        j = 0
-        bvals = [1.0]
+    #     prev_logB = 0.0
+    #     j = 0
+    #     bvals = [1.0]
         
-        found = False
+    #     found = False
     
-        while True:
-            j += 1
-            t = j * dt
-            logB = B_log_at_t(t)
-            bvals.append(float(np.exp(logB)))
+    #     while True:
+    #         j += 1
+    #         t = j * dt
+    #         logB = B_log_at_t(t)
+    #         bvals.append(float(np.exp(logB)))
             
-            if float(np.exp(logB)) < 1e-5:
-                found = True
-                break
+    #         if float(np.exp(logB)) < 1e-5:
+    #             found = True
+    #             break
     
-            if abs(np.exp(logB)-np.exp(prev_logB)) <= tol:   
-                break
-            prev_logB = logB
-        if found:
-            break
-        all_bs.append(bvals)
-    endTime = datetime.now()
-    endTime - startTime
+    #         if abs(np.exp(logB)-np.exp(prev_logB)) <= tol:   
+    #             break
+    #         prev_logB = logB
+    #     if found:
+    #         break
+    #     all_bs.append(bvals)
+    # endTime = datetime.now()
+    # endTime - startTime
     
    
     
@@ -1869,106 +1662,67 @@ r_func = r,
 ss = ss, 
 ps = ps, 
 R_cutoff = 0.01
+
+def exon_nearby_log_with_r0_batch(ss, ps,
+                                   mu_near, lb_near, ub_near,
+                                   rbp_near, r0_near, t):
+    """
+    Log-contribution for a NEARBY exon that does NOT contain the focal site
+    """
+
+    t = float(t)
+    if t <= 0:
+        return 0.0
+
+    # Convert to arrays
+    s = np.asarray(ss, dtype=np.float64)[None, :]        # (1,K)
+    p = np.asarray(ps, dtype=np.float64)[None, :]        # (1,K)
+
+    lb  = np.asarray(lb_near,  dtype=np.float64)[:, None]  # (N,1)
+    ub  = np.asarray(ub_near,  dtype=np.float64)[:, None]
+    rbp = np.asarray(rbp_near, dtype=np.float64)[:, None]
+    r0  = np.asarray(r0_near,  dtype=np.float64)[:, None]
+    mu  = np.asarray(mu_near,  dtype=np.float64)[:, None]
+
+    # Effective rates:
+    a = lb * rbp + r0 + s        # (N,K)
+    b = r0 + s + ub * rbp        # (N,K)
+
+    # Exponentials
+    e2tb = np.exp(-2.0 * t * b)
+    etb  = np.exp(-t * b)
+    e2ta = np.exp(-2.0 * t * a)
+    eta  = np.exp(-t * a)
+
+    # Rational numerator
+    numer = (-(lb * rbp)
+             - (lb * rbp + r0 + s) * e2tb
+             + 2.0 * (lb * rbp + r0 + s) * etb
+             + rbp * ub
+             + (r0 + s + rbp * ub) * e2ta
+             - 2.0 * (r0 + s + rbp * ub) * eta)
+
+    denom = a * b
+    frac = np.divide(numer, denom,
+                     out=np.zeros_like(numer),
+                     where=(denom != 0.0))
+
+    # Gamma terms
+    gamma_part = (2.0 * t * exp1(a * t)
+                  - 2.0 * t * exp1(2.0 * a * t)
+                  + 2.0 * t * (-exp1(b * t) + exp1(2.0 * b * t)))
+
+    inside = frac + gamma_part
+
+    contrib = -(s * mu * inside) / rbp      # (N,K)
+
+    # Sum over DFE bins and exons
+    return float(np.sum(p * contrib))
+
+
     
-   
-    
-def make_B_log_evaluator_3case_from_aligned(
-    recDist_i, fp, R_cutoff, ss, ps, LL, LU, MU, r_func, scaledu, 
-):
-    rf = r_func(fp)
 
-    contains = (LL <= fp) & (fp <= LU)
 
-    # r0 for exons not containing focal
-    nearby = (~contains) & (recDist_i <= R_cutoff)
-    external = (~contains) & (~nearby)
-
-    ext_logB = make_external_logB_evaluator(recDist_i, scaledu, ss, ps, external)
-
-    # indices to evaluate integrals on:
-    idx_contains = np.nonzero(contains)[0]      # usually length 0 or 1
-    idx_nearby   = np.nonzero(nearby)[0]        # typically small
-
-    def logB(t):
-        total = ext_logB(t)
-
-        # Case B: containing exon(s) (almost always one)
-        for j in idx_contains:
-            total += exon_contains_focal_log(ss, ps, MU[j], LL[j], LU[j], fp, r_func, t)
-
-        # Case C: nearby non-containing exons
-        # compute lb/ub in bp using vector ops, then loop only those indices
-        # (looping over a small idx_nearby is fine; K=20 cost dominates)
-        for j in idx_nearby:
-            dLL = abs(fp - LL[j])
-            dLU = abs(fp - LU[j])
-            lb = dLL if dLL < dLU else dLU
-            ub = dLU if dLL < dLU else dLL
-            total += exon_nearby_log_with_r0(ss, ps, MU[j], lb, ub, RB[j], r0[j], t)
-
-        return total
-
-    return logB
-
-def make_B_log_evaluator_3case(
-    recDist_i, positions, scaledu,
-    exons, focalPos, r_func,
-    ss, ps, R_cutoff
-):
-    recDist_i = np.asarray(recDist_i, np.float64)
-    ext_mask = recDist_i > R_cutoff
-
-    ext_logB = make_external_logB_evaluator(recDist_i, scaledu, ss, ps, ext_mask)
-    
-    
-    # here, this needs to change
-
-    # Precompute exon geometry per focal (lb, ub, rbp, case)
-    exon_cases = []
-    for ll, lu, u_exon in exons:
-        ll = float(ll); lu = float(lu); u_exon = float(u_exon)
-
-        if ll <= focalPos <= lu:
-            exon_cases.append(("contains", ll, lu, u_exon, None, None, None))
-            continue
-
-        # nearby test in r-space (recommended): distance from focal to nearer exon endpoint in recomb units
-        # nearest endpoint to focal:
-        if focalPos < ll:
-            near_bp = ll - focalPos
-            far_bp  = lu - focalPos
-            lb = near_bp
-            ub = far_bp
-        else:  # focalPos > lu
-            near_bp = focalPos - lu
-            far_bp  = focalPos - ll
-            lb = near_bp
-            ub = far_bp
-
-        # decide "nearby exon" using recomb distance at the nearer endpoint:
-        near_R = abs(r_func(focalPos) - r_func(focalPos + (ll - focalPos if focalPos < ll else lu - focalPos)))
-        # If you prefer purely from recDist matrix, replace this rule with your own.
-        if near_R <= R0:
-            rbp = (r_func(lu) - r_func(ll)) / (lu - ll)
-            exon_cases.append(("nearby", ll, lu, u_exon, lb, ub, rbp))
-        else:
-            exon_cases.append(("external", ll, lu, u_exon, None, None, None))
-
-    def logB(t):
-        t = float(t)
-        total = ext_logB(t)
-
-        for tag, ll, lu, u_exon, lb, ub, rbp in exon_cases:
-            if tag == "contains":
-                total += exon_contains_focal_log(ss, ps, u_exon, ll, lu, focalPos, r_func, t)
-            elif tag == "nearby":
-                total += exon_nearby_log(ss, ps, u_exon, lb, ub, rbp, t)
-            # "external": do nothing (already in point-mass sum if represented there)
-
-        return total
-
-    return logB
- 
 
                    
 
