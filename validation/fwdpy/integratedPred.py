@@ -13,6 +13,8 @@ import warnings
 # from __future__ import annotations
 from typing import List
 from scipy.special import gamma, gammaincc, exp1
+from datetime import datetime
+
 
 os.chdir('/home/nathan/Documents/GitHub/BGSdemo/validation/fwdpy')
 from deme_funs import _get_demographic_events, _get_deme_sample_sizes, _get_root_Ne, _sizes_at_time, _migration_rate_in_interval, _compute_sfs, _reorder_fs
@@ -289,49 +291,6 @@ def getRecDist(pos,r,focalPos):
     
     bigR = r(right) - r(left)
     return (1 - np.exp(- 2 * bigR)) / 2    
-    
-# getRecDist(pos, recMap, focalPos)
-# def getRecDist(pos, r, focalPos):
-#     left = min(pos, focalPos)
-#     right = max(pos, focalPos)
-    
-#     # startTime = datetime.now()
-#     i = 0
-#     done = True
-#     leftCount = 0
-#     rightCount = 0
-#     while done:
-#         x = r[i]
-#         if x[1] >= left and x[0] <= left:
-#             leftCount += 1
-#             leftIndex = i
-#         if x[1] >= right and x[0] <= right:
-#             rightCount += 1 
-#             rightIndex = i
-#             done = False
-#         i += 1
-#     # endTime = datetime.now()
-#     # endTime - startTime
-    
-#     # startTime = datetime.now()
-#     # leftIndex = [i for i,x in enumerate(r) if x[1] > left and x[0] < left][0] # todo could probably speed this up
-#     # rightIndex = [i for i,x in enumerate(r) if x[1] > right and x[0] < right][0] # todo missing equals
-#     # endTime = datetime.now()
-#     # endTime - startTime
-    
-#     rleft = r[leftIndex]
-#     rright = r[rightIndex]
-    
-#     if leftIndex == rightIndex:
-#         bigR = [(right - left) * rleft[2]]
-#     else:
-#         intermediate = r[(leftIndex + 1):(rightIndex-1)]    
-#         bigR = [(y - x) * z for x,y,z in intermediate]
-#         bigR.append((rleft[1]-left) * rleft[2]) 
-#         bigR.append((right-rright[0]) * rright[2])
-        
-#     bigR = np.sum(bigR)
-#     return (1 - np.exp(- 2 * bigR)) / 2
 
 def pointMassContribution(u, s, t, r):
     return - u / s * (s / (r + s) * (1 - math.exp(- r * t - s * t)))**2
@@ -463,25 +422,7 @@ def get_scaling_fun_2(u, ss, ps, r, focalPos, censusSize, totalT, tol, grid_pts 
             tt = ancTime / 2 / ancNe
         return [tmp_fun(tt).tolist()]
     return(q_fun, ancTime, ancNe)
-# def get_scaling_fun(positions, u, ss, ps, r, focalPos, censusSize, totalT, tol):
-#     scaledu = [z * (y - x) for x,y,z in u]
-#     recDist = [getRecDist(pos, r, focalPos) for pos in positions]
-    
-#     diff = 100
-#     start = 1
-#     i = 0
-#     while abs(diff) > tol:
-#         end = B(scaledu, ss, ps, (i + 1) * censusSize / 10, recDist)
-#         diff = end - start
-#         start = end
-#         i += 1
-        
-#     ancTime = censusSize / 10 * i
-#     ancTime = max(ancTime, totalT * 2 * censusSize)
-#     ancB = B(scaledu, ss, ps, ancTime, recDist)
-#     ancNe = ancB * censusSize
-#     return(lambda t: [math.exp(sum([p * rescaledPointMassContribution(u, s, t, r, ancNe, ancTime) for u,r in zip(scaledu, recDist) for p,s in zip(ps, ss)])) / ancB], ancTime, ancNe)
-  
+
 def getOldestEpoch(graph):
     tme = 0
     for deme in graph.demes:
@@ -1087,49 +1028,12 @@ def get_map_diffs(thing):
 # ax.set_ylabel("cs(t)")
 # ax.legend();   
 
-# [cs(0),rescaledcs(0)]
-
-# [cs(totalT), rescaledcs(ancTime / 2/ ancNe)]
 
 # fig, ax = plt.subplots(1, 1, figsize=(8, 4))
 # ax.plot(np.arange(0,ancTime / 2 / ancNe, 0.001),[f(t) for t in np.arange(0,ancTime / 2 / ancNe, 0.001)], "-", ms=8, lw=1, label="f(t)")
 # ax.set_xlabel("Time in past")
 # ax.set_ylabel("f(t)")
 # ax.legend();   
-
-# u = exonMutMap
-# r = recMap
-# focalPos = focalPos
-# sample_size = [sample_size]
-# ss = ss
-# sampled_demes=sampled_demes
-# g = demo  
-
-# cs = None
-# totalT = None
-# L = None
-# ps = None
-# targetSize = 1e4
-# tol = 1e-4
-# minPos = None
-# focal_s = None
-
-# u = u
-# r = r
-# focalPos = focalPos
-# sample_size = [sample_size]
-# ss = [curs]
-# L = L
-# sampled_demes=sampled_demes
-# g = demo
-
-# cs = None
-# totalT = None
-# ps = None
-# targetSize = 1e4
-# tol = 1e-4
-# minPos = None
-# focal_s = None
                         
 def bgs_wrapper(u,
                 r,
@@ -1393,7 +1297,6 @@ def bgs_wrapper(u,
     else:
         raise ValueError('cs or g must be specified.')
 
-from datetime import datetime
 ###################
 # OOA Gamma Exons #
 ###################
