@@ -944,31 +944,6 @@ def discretize_deleterious_gamma_dfe_mean_shape(
 
     return dfe
  
-
-focalPos = 49885518.61638361
-demo = demes.load('ooa.yaml')
-sampled_demes = ['CEU']
-u = exonMutMap
-r = recMap
-ss = ss
-
-cs = None
-g = demo
-totalT = None
-L = None
-ps = None
-targetSize = 1e4
-tol = 1e-4
-minPos = None
-focal_s = None
-
-fig, ax = plt.subplots(1, 1, figsize=(8, 4))
-ax.plot(np.arange(0,ancTime / 2 / ancNe, 0.001),[f(t) for t in np.arange(0,ancTime / 2 / ancNe, 0.001)], "-", ms=8, lw=1, label="B(t)")
-ax.set_xlabel("Time in past")
-ax.set_ylabel("B(t)")
-ax.legend();       
-
-
 def bgs_wrapper(u,
                 r,
                 focalPos,
@@ -1385,10 +1360,57 @@ def cluster_scale_funs(u,
     if (type(focal_positions) is not list and type(focal_positions) is not np.ndarray) or not isinstance(focal_positions[0], (int, float)):
             raise ValueError('focal_positions must be a list of int or float')
     
+    startTime = datetime.now()
+    B_grid = get_Bs(u, ss, ps, r, focal_positions, tol)
+    endTime = datetime.now()
+    endTime - startTime
+    
+    startTime = datetime.now()
+    B_grid = ragged_to_rect_repeat_last(B_grid)
+    endTime = datetime.now()
+    endTime - startTime
+    
+    startTime = datetime.now()
+    D = pairwise_ssd(B_grid)
+    endTime = datetime.now()
+    endTime - startTime
+    
+    
 
-    get_Bs(u, ss, ps, r, focal_positions, tol)
+def pairwise_ssd(B):
+    """
+    B: (F, T) array
+    returns: (F, F) matrix D where D[i,k] = sum_j (B[i,j] - B[k,j])**2
+    """
 
-                                                      
+    # squared norms of each row: (F,)
+    norms2 = np.einsum('ij,ij->i', B, B)
+
+    # Gram matrix: (F,F) = B @ B.T
+    G = B @ B.T
+
+    # pairwise squared distances
+    D = norms2[:, None] + norms2[None, :] - 2.0 * G
+
+    # numerical cleanup: tiny negative values to 0
+    np.maximum(D, 0.0, out=D)
+    return D
+
+
+def ragged_to_rect_repeat_last(all_bs, dtype=np.float64):
+    F = len(all_bs)
+    lengths = np.fromiter((len(row) for row in all_bs), count=F, dtype=np.int64)
+    T_max = int(lengths.max())
+
+    out = np.empty((F, T_max), dtype=dtype)
+
+    for i, row in enumerate(all_bs):
+        r = np.asarray(row)
+        n = r.size
+        out[i, :n] = r
+        out[i, n:] = r[-1]   # repeat equilibrium value
+
+    return out
 
 def getRecDist_3(positions, r, focal_positions):
     Rpos = r(positions)   # shape (M,)
@@ -1397,8 +1419,6 @@ def getRecDist_3(positions, r, focal_positions):
     bigR = np.abs(Rpos[None, :] - Rfoc[:, None])           # (F, M)
     return 0.5 * (1.0 - np.exp(-2.0 * bigR))            # (F, M)
 
-
-# exon_contains_focal_log(ss, ps, MU[j], LL[j], LU[j], fp, r_func, t)
 # u = MU[j]
 # ll = LL[j]
 # lu = LU[j]
@@ -1452,15 +1472,12 @@ def internal_containing_vec(s, u, l, t, r):
 
     return (u * (frac_term + gamma_term)) / r
 
-
 # Source - https://stackoverflow.com/a/52186952
 # Posted by MuellerSeb
 # Retrieved 2026-02-08, License - CC BY-SA 4.0
 
 def inc_gamma(a, x):
     return exp1(x) if a == 0 else gamma(a)*gammaincc(a, x)
-
-
 
 def make_external_logB_evaluator(recDist_i, scaledu, ss, ps, ext_mask):
     U = np.asarray(scaledu, np.float64)[ext_mask][:, None]   # (Mext,1)
@@ -1490,17 +1507,17 @@ def make_external_logB_evaluator(recDist_i, scaledu, ss, ps, ext_mask):
 
     return ext_logB
 
-fig, ax = plt.subplots(1, 1, figsize=(8, 4))
-ax.plot(np.arange(0,ancTime, 1000),[B(scaledu, ss, ps, t, rd) for t in np.arange(0,ancTime,1000)], "-", ms=8, lw=1, label="B(t)")
-ax.set_xlabel("Time in past")
-ax.set_ylabel("B(t)")
-ax.legend(); 
+# fig, ax = plt.subplots(1, 1, figsize=(8, 4))
+# ax.plot(np.arange(0,ancTime, 1000),[B(scaledu, ss, ps, t, rd) for t in np.arange(0,ancTime,1000)], "-", ms=8, lw=1, label="B(t)")
+# ax.set_xlabel("Time in past")
+# ax.set_ylabel("B(t)")
+# ax.legend(); 
 
-fig, ax = plt.subplots(1, 1, figsize=(8, 4))
-ax.plot(np.arange(0,totalgen, 100),[B(scaledu, ss, ps, t, rd) for t in np.arange(0,totalgen,100)], "-", ms=8, lw=1, label="B(t)")
-ax.set_xlabel("Time in past")
-ax.set_ylabel("B(t)")
-ax.legend(); 
+# fig, ax = plt.subplots(1, 1, figsize=(8, 4))
+# ax.plot(np.arange(0,totalgen, 100),[B(scaledu, ss, ps, t, rd) for t in np.arange(0,totalgen,100)], "-", ms=8, lw=1, label="B(t)")
+# ax.set_xlabel("Time in past")
+# ax.set_ylabel("B(t)")
+# ax.legend(); 
 
 
 def exon_contains_focal_log(ss, ps, u, ll, lu, focalPos, rbp, t):
@@ -1510,8 +1527,6 @@ def exon_contains_focal_log(ss, ps, u, ll, lu, focalPos, rbp, t):
     if t <= 0:
         return 0.0
     
-    # Local recombination-per-bp inside this exon
-    rbp = (r_func(lu) - r_func(ll)) / (lu - ll) #TODO computing this twice
     # distance to endpoints
     lL = focalPos - ll
     lR = lu - focalPos
@@ -1522,8 +1537,10 @@ def exon_contains_focal_log(ss, ps, u, ll, lu, focalPos, rbp, t):
     contrib = internal_containing_vec(s, u, lL, t, rbp) + internal_containing_vec(s, u, lR, t, rbp)
     return float(np.sum(p * contrib))
 
+# r_func = r
 
 def get_Bs(u, ss, ps, r_func, focal_positions, tol, grid_pts = 100):
+    # first define some variables that are reused often
     ex = np.asarray(u, dtype=np.float64)   # (E,3)
     LL = ex[:,0]                               # (E,) start positions
     LU = ex[:,1]                               # (E,) end positions
@@ -1536,133 +1553,150 @@ def get_Bs(u, ss, ps, r_func, focal_positions, tol, grid_pts = 100):
     RLL = r_func(LL)                  # (E,) 
     RLU = r_func(LU)                  # (E,) 
     RB  = (RLU - RLL) / (LU - LL)              # (E,) recomb per bp within exon
-        
+    
+    
     # startTime = datetime.now()
-    recDist = getRecDist_3(positions, r_func, focal_positions) # recDist[i, j] is distance between focal_positions[i] and positions[j]
+    recDist = getRecDist_3(positions, r_func, focal_positions) # (F,E) recDist[i, j] is distance between focal_positions[i] and positions[j]
     # endTime = datetime.now()
     # endTime - startTime
     
-    startTime = datetime.now()
+    # startTime = datetime.now()
     
     all_bs = []
     dt = 1e3
     
-    for i,fp in enumerate(len(focal_positions)):
+    for i,fp in enumerate(focal_positions):
+        rf = r_func(fp)
+        dL = np.abs(fp - LL)   # (E,) distance to left endpoint for all exons
+        dU = np.abs(fp - LU)   # (E,) distance to right endpoint
+        
+        lb_all = np.minimum(dL, dU)   # (E,) nearer boundary distance (bp)
+        ub_all = np.maximum(dL, dU)   # (E,) farther boundary distance (bp)
+
         B_log_at_t = make_B_log_evaluator_3case(recDist_i = recDist[i],  
                                                 fp = fp,
                                                 R_cutoff = 0.01,
                                                 ss = ss, 
                                                 ps = ps, 
-                                                LL,
-                                                LU,
-                                                MU,
-                                                RB,)
+                                                LL = LL,
+                                                LU = LU,
+                                                MU = MU,
+                                                RLL = RLL, 
+                                                RLU = RLU,
+                                                RB = RB,
+                                                rf = rf,
+                                                scaledu = scaledu,
+                                                lb_all = lb_all,
+                                                ub_all = ub_all)
+        
+        prev_logB = 0.0
+        j = 0
+        bvals = [1.0]
+        
+        equil = False
+        while not equil:
+            j += 1
+            t = j * dt
+            logB = B_log_at_t(t)
+            bvals.append(float(np.exp(logB)))
+            
+            if abs(np.exp(logB)-np.exp(prev_logB)) <= tol: 
+                equil = True
+            prev_logB = logB
+            
+        all_bs.append(bvals)
+    # endTime = datetime.now()
+    # endTime - startTime
+    return all_bs
                                                 
                                                 
                                                 
+                                                # all_bs = []
+                                                # dt = 1e3
+                                                
+                                                # for i,fp in enumerate(len(focal_positions)):
+                                                    
+                                                    
+                                                    
+                                                #     B_log_at_t = make_B_evaluator_for_focal(recDist[i], S_row, U_col, P_row) 
+                                                
+                                                #     prev_logB = 0.0
+                                              
+                                                #     j = 0
+                                                #     bvals = [1.0]
+                                                    
+                                                #     found = False
+                                                
+                                                #     while True:
+                                                #         j += 1
+                                                #         t = j * dt
+                                                #         logB = B_log_at_t(t)
+                                                #         bvals.append(float(np.exp(logB)))
+                                                        
+                                                #         if float(np.exp(logB)) < 1e-5:
+                                                #             found = True
+                                                #             break
+                                                
+                                                #         if abs(np.exp(logB)-np.exp(prev_logB)) <= tol:   
+                                                #             break
+                                                #         prev_logB = logB
+                                                #     if found:
+                                                #         break
+                                                #     all_bs.append(bvals)
+                                                # endTime = datetime.now()
+                                                # endTime - startTime
                                                 
                                                 
-                                                # positions = positions, 
-                                                # scaledu = scaledu, 
-                                                # exons = u, 
-                                                # focalPos = fp, 
-                                                # r_func = r, 
-                                                
-
+# TODO now two case
 def make_B_log_evaluator_3case(
-    recDist_i, fp, R_cutoff, ss, ps, LL, LU, MU, RLL, RLU, RB,
+    recDist_i, fp, R_cutoff, ss, ps, LL, LU, MU, RLL, RLU, RB, rf, scaledu, lb_all, ub_all
 ):
     # creating masks
-    contains = (LL <= fp) & (fp <= LU) #TODO deal with length >1 edge-case
-    nearby = (~contains) & (recDist_i <= R_cutoff)
-    external = (~contains) & (~nearby)
+    #TODO deal with contains length >1 edge-case
+    contains = (LL <= fp) & (fp <= LU) # (E,)
+    # nearby = (~contains) & (recDist_i <= R_cutoff)
+    external = (~contains) # & (~nearby)
     
-    r0 = np.minimum(np.abs(RLL - rf), np.abs(RLU - rf))
+    # distance from fp to NEARER exon endpoint
+    # r0 = np.minimum(np.abs(RLL - rf), np.abs(RLU - rf)) # (E,)
     
     # preparing lambda function for far away exons
     ext_logB = make_external_logB_evaluator(recDist_i, scaledu, ss, ps, external)
 
     # indices to evaluate over:
     idx_contains = np.nonzero(contains)[0]      # length 0 or 1
-    idx_nearby   = np.nonzero(nearby)[0]        # typically small
+    # idx_nearby   = np.nonzero(nearby)[0]        # typically small
 
     def logB(t):
         # Case A: far away
         total = ext_logB(t)
 
         # Case B: containing exon
+        if len(idx_contains) > 1:
+            raise ValueError('Woah there, partner!')
         for j in idx_contains:
             total += exon_contains_focal_log(ss, ps, MU[j], LL[j], LU[j], fp, RB[j], t)
 
-        # Case C: nearby non-containing exons
-        for j in idx_nearby:
-            dLL = abs(fp - LL[j])
-            dLU = abs(fp - LU[j])
-            lb = dLL if dLL < dLU else dLU
-            ub = dLU if dLL < dLU else dLL
-            total += exon_nearby_log_with_r0(ss, ps, MU[j], lb, ub, RB[j], r0[j], t)
+        # # Case C: nearby non-containing exons
+        # if len(idx_nearby) > 0:
+        #     lb_near  = lb_all[idx_nearby]
+        #     ub_near  = ub_all[idx_nearby]
+        #     rbp_near = RB[idx_nearby]
+        #     r0_near  = r0[idx_nearby]
+        #     mu_near  = MU[idx_nearby]
+            
+        #     total += exon_nearby_log_with_r0_batch(
+        #                  ss, ps,
+        #                  mu_near, lb_near, ub_near,
+        #                  rbp_near, r0_near, t
+        #              )
+
 
         return total
 
-    return logB
-    # all_bs = []
-    # dt = 1e3
-    
-    # for i,fp in enumerate(len(focal_positions)):
-        
-        
-        
-    #     B_log_at_t = make_B_evaluator_for_focal(recDist[i], S_row, U_col, P_row) 
-    
-    #     prev_logB = 0.0
-    #     j = 0
-    #     bvals = [1.0]
-        
-    #     found = False
-    
-    #     while True:
-    #         j += 1
-    #         t = j * dt
-    #         logB = B_log_at_t(t)
-    #         bvals.append(float(np.exp(logB)))
-            
-    #         if float(np.exp(logB)) < 1e-5:
-    #             found = True
-    #             break
-    
-    #         if abs(np.exp(logB)-np.exp(prev_logB)) <= tol:   
-    #             break
-    #         prev_logB = logB
-    #     if found:
-    #         break
-    #     all_bs.append(bvals)
-    # endTime = datetime.now()
-    # endTime - startTime
-    
-   
-    
-   
-    
-recDist_i = recDist[i] 
-fp = fp
-ss = ss
-ps = ps
-R_cutoff = 0.01
-LL = LL
-LU = LU
-MU = MU
-r_func = r_func
+    return logB   
 
-
-positions = positions, 
-scaledu = scaledu, 
-exons = u, 
-focalPos = fp, 
-r_func = r, 
-ss = ss, 
-ps = ps, 
-R_cutoff = 0.01
-
+# TODO rename
 def exon_nearby_log_with_r0_batch(ss, ps,
                                    mu_near, lb_near, ub_near,
                                    rbp_near, r0_near, t):
@@ -1684,25 +1718,26 @@ def exon_nearby_log_with_r0_batch(ss, ps,
     r0  = np.asarray(r0_near,  dtype=np.float64)[:, None]
     mu  = np.asarray(mu_near,  dtype=np.float64)[:, None]
 
-    # Effective rates:
+    # precompute common terms:
     a = lb * rbp + r0 + s        # (N,K)
     b = r0 + s + ub * rbp        # (N,K)
 
     # Exponentials
-    e2tb = np.exp(-2.0 * t * b)
+    e2tb = np.exp(-2.0 * t * b)  # (N,K)
     etb  = np.exp(-t * b)
     e2ta = np.exp(-2.0 * t * a)
     eta  = np.exp(-t * a)
 
-    # Rational numerator
-    numer = (-(lb * rbp)
+    #  numerator
+    # TODO some of this can be replaced with a and b
+    numer = (-(lb * rbp)   # (N,K)
              - (lb * rbp + r0 + s) * e2tb
              + 2.0 * (lb * rbp + r0 + s) * etb
              + rbp * ub
              + (r0 + s + rbp * ub) * e2ta
              - 2.0 * (r0 + s + rbp * ub) * eta)
 
-    denom = a * b
+    denom = a * b   # (N,K)
     frac = np.divide(numer, denom,
                      out=np.zeros_like(numer),
                      where=(denom != 0.0))
@@ -1719,18 +1754,12 @@ def exon_nearby_log_with_r0_batch(ss, ps,
     # Sum over DFE bins and exons
     return float(np.sum(p * contrib))
 
-
-    
-
-
-
-                   
-
 def get_pred_loci(n_pos, r):
     loci = np.linspace(r[0][0], r[-1][-2], n_pos + 2)
     return loci[1:-1]
     
-    
+
+# TODO almost all time spent in nearby
 
 
 os.chdir("/home/nathan/Documents/GitHub/BGSdemo/validation/fwdpy/DemographicSims/ooa/threepop/weakSelection")
@@ -1763,114 +1792,116 @@ cluster_scale_funs(u = exonMutMap,
 
 
 
-focalPos = 49885518.61638361
-demo = demes.load('ooa.yaml')
-sampled_demes = ['CEU']
-u = exonMutMap
-r = recMap
-focal_positions = focal_positions
-ss = ss
-sample_size = 40
 
-[[x,y] for x,y in exonMap if x < focalPos and y > focalPos]
-u = [[x,y,z] for x,y,z in u if x <= 49887179 and y >= 49883661]
+                                                         
+# focalPos = 49885518.61638361
+# demo = demes.load('ooa.yaml')
+# sampled_demes = ['CEU']
+# u = exonMutMap
+# r = recMap
+# focal_positions = focal_positions
+# ss = ss
+# sample_size = 40
 
-fs, ancNe = bgs_wrapper(u = u,
-                        r = recMap,
-                        focalPos = focalPos,
-                        sample_size = [sample_size],
-                        ss = ss,
-                        sampled_demes=sampled_demes,
-                        g = demo)
+# [[x,y] for x,y in exonMap if x < focalPos and y > focalPos]
+# u = [[x,y,z] for x,y,z in u if x <= 49887179 and y >= 49883661]
 
-fs_neu = moments.Spectrum.from_demes(
-    demo, 
-    sampled_demes=sampled_demes, 
-    sample_sizes=[sample_size]
-)
+# fs, ancNe = bgs_wrapper(u = u,
+#                         r = recMap,
+#                         focalPos = focalPos,
+#                         sample_size = [sample_size],
+#                         ss = ss,
+#                         sampled_demes=sampled_demes,
+#                         g = demo)
 
-oldestEpoch, ancCensusSize = getOldestEpoch(demo)
-fs = fs * 8 * 1e-8 * ancNe
-fs_neu = fs_neu * 8 * 1e-8 * ancCensusSize    
+# fs_neu = moments.Spectrum.from_demes(
+#     demo, 
+#     sampled_demes=sampled_demes, 
+#     sample_sizes=[sample_size]
+# )
+
+# oldestEpoch, ancCensusSize = getOldestEpoch(demo)
+# fs = fs * 8 * 1e-8 * ancNe
+# fs_neu = fs_neu * 8 * 1e-8 * ancCensusSize    
 
 
-fig, ax = plt.subplots(1, 1, figsize=(16, 8), sharex=True, sharey=False)
-fig.text(0.5, 0.04, 'Allele Frequency', ha='center')
-fig.text(0.04, 0.5, 'Count', va='center', rotation='vertical')
-fig.subplots_adjust(hspace = .25)
-fig.suptitle(str(focalPos))
-ax.plot(fs, "-", ms=8, lw=1, label="BGS")
-ax.plot(fs_neu, "-", ms=8, lw=1, label="SNM")
-ax.set_title("nbins = " + str(nbins)) 
-ax.set_yscale('log')
-ax.annotate("B=" + str(round(fs.pi()/fs_neu.pi(),3)),xy=(sample_size / 10, max(fs[1:-1]) * 0.8),size="x-large")
-ax.legend();
+# fig, ax = plt.subplots(1, 1, figsize=(16, 8), sharex=True, sharey=False)
+# fig.text(0.5, 0.04, 'Allele Frequency', ha='center')
+# fig.text(0.04, 0.5, 'Count', va='center', rotation='vertical')
+# fig.subplots_adjust(hspace = .25)
+# fig.suptitle(str(focalPos))
+# ax.plot(fs, "-", ms=8, lw=1, label="BGS")
+# ax.plot(fs_neu, "-", ms=8, lw=1, label="SNM")
+# ax.set_title("nbins = " + str(nbins)) 
+# ax.set_yscale('log')
+# ax.annotate("B=" + str(round(fs.pi()/fs_neu.pi(),3)),xy=(sample_size / 10, max(fs[1:-1]) * 0.8),size="x-large")
+# ax.legend();
 
 #############
 # OOA Gamma #
 #############
-def get_ceu_data(params):
-    seeds = [y for x,y in params]
-    numSum = 0
-    data = None
-    for seed in seeds:
-        loaded = np.load(str(seed) + '.npz')
-        loaded = loaded['ceu']
-        loaded = loaded
+# def get_ceu_data(params):
+#     seeds = [y for x,y in params]
+#     numSum = 0
+#     data = None
+#     for seed in seeds:
+#         loaded = np.load(str(seed) + '.npz')
+#         loaded = loaded['ceu']
+#         loaded = loaded
         
-        if data is None:
-            data = loaded
-        else:
-            data = np.add(data, loaded)
+#         if data is None:
+#             data = loaded
+#         else:
+#             data = np.add(data, loaded)
         
-        numSum += 1
+#         numSum += 1
     
-    data /= numSum
-    return data
+#     data /= numSum
+#     return data
 
-def read_params():
-    intervals = []
-    with open('ooaGamma.txt') as f:
-        for line in f:
-            if line.startswith("#") or line.strip() == "":
-                continue
-            fields = line.strip().split()
-            demo   = str(fields[0])
-            seed  = int(fields[1])
-            intervals.append([demo, seed])
-    return intervals
+# def read_params():
+#     intervals = []
+#     with open('ooaGamma.txt') as f:
+#         for line in f:
+#             if line.startswith("#") or line.strip() == "":
+#                 continue
+#             fields = line.strip().split()
+#             demo   = str(fields[0])
+#             seed  = int(fields[1])
+#             intervals.append([demo, seed])
+#     return intervals
 
-def get_windows(recMap, mutMap):
-    chrom_start = recMap[0][0]
-    chrom_end = get_max_positions(recMap, mutMap)
+# def get_windows(recMap, mutMap):
+#     chrom_start = recMap[0][0]
+#     chrom_end = get_max_positions(recMap, mutMap)
 
     
-    pos = [chrom_start + 5e5]
-    done = False
-    while not done:
-        new_pos = pos[-1] + 1e6
-        if new_pos <= chrom_end:
-            pos.append(new_pos)
-        else:
-            done = True
+#     pos = [chrom_start + 5e5]
+#     done = False
+#     while not done:
+#         new_pos = pos[-1] + 1e6
+#         if new_pos <= chrom_end:
+#             pos.append(new_pos)
+#         else:
+#             done = True
             
-    windows = [[p - 1, p + 1] for p in pos]
-    windows = [x for w in windows for x in w]
-    windows.insert(0, 0)
-    windows.append(chrom_end)
+#     windows = [[p - 1, p + 1] for p in pos]
+#     windows = [x for w in windows for x in w]
+#     windows.insert(0, 0)
+#     windows.append(chrom_end)
     
-    return windows
+#     return windows
 
-def get_focal_pos(windows):
-    tmp = []
-    for i in range(len(windows) - 1):
-        if windows[i+1] - windows[i] == 2:
-            tmp.append([windows[i], windows[i+1]])
+# def get_focal_pos(windows):
+#     tmp = []
+#     for i in range(len(windows) - 1):
+#         if windows[i+1] - windows[i] == 2:
+#             tmp.append([windows[i], windows[i+1]])
     
-    return [(x+y)/2 for x,y in tmp]
+#     return [(x+y)/2 for x,y in tmp]
 
-def get_max_positions(recMap, mutMap):
-    return max(recMap[-1][1], mutMap[-1][1])
+# def get_max_positions(recMap, mutMap):
+#     return max(recMap[-1][1], mutMap[-1][1])
 
 # 875 / 2 / 12378 * shape to get the 0.006 number
 # mean = 0.00657416 / 2
