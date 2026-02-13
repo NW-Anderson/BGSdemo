@@ -1391,21 +1391,21 @@ def cluster_scale_funs(u,
     
     plot_kmedoids_clusters(B_grid, labels, medoids)
 
-from sklearn.decomposition import PCA
+# from sklearn.decomposition import PCA
 
-X = PCA(2).fit_transform(B_grid)
+# X = PCA(2).fit_transform(B_grid)
 
-plt.scatter(X[:,0], X[:,1], s=5)
-plt.xlabel("PC1")
-plt.ylabel("PC2")
-plt.show()
+# plt.scatter(X[:,0], X[:,1], s=5)
+# plt.xlabel("PC1")
+# plt.ylabel("PC2")
+# plt.show()
 
 def choose_k_kmedoids_silhouette(D, k_min=2, k_max=20, random_state=0):
     """
     Returns (best_K, best_labels, best_medoids, scores_dict)
     D: (F,F) distance matrix (squared distances are OK; monotone transform preserves ordering reasonably)
     """
-    D = np.asarray(D, dtype=np.float64)
+    D = np.asarray(D, dtype=np.float64) # TODO check if as array call is needed again
     best = (-np.inf, None, None, None)  # (score, K, labels, medoids)
     scores = {}
 
@@ -1577,10 +1577,10 @@ def inc_gamma(a, x):
     return exp1(x) if a == 0 else gamma(a)*gammaincc(a, x)
 
 def make_external_logB_evaluator(recDist_i, scaledu, ss, ps, ext_mask):
-    U = np.asarray(scaledu, np.float64)[ext_mask][:, None]   # (Mext,1)
-    R = np.asarray(recDist_i, np.float64)[ext_mask][:, None] # (Mext,1)
-    S_row = np.asarray(ss, np.float64)[None, :]              # (1,K)
-    P_row = np.asarray(ps, np.float64)[None, :]              # (1,K)
+    U = scaledu[ext_mask][:, None]   # (Mext,1) 
+    R = recDist_i[ext_mask][:, None] # (Mext,1)
+    S_row = ss[None, :]              # (1,K)
+    P_row = ps[None, :]              # (1,K)
 
     D = R + S_row                                            # (Mext,k)
     # W = (-u*s / D^2) * p  (all t-independent, includes p)
@@ -1628,11 +1628,8 @@ def exon_contains_focal_log(ss, ps, u, ll, lu, focalPos, rbp, t):
     lL = focalPos - ll
     lR = lu - focalPos
     
-    s = np.asarray(ss, np.float64) # TODO computing this twice
-    p = np.asarray(ps, np.float64)
-    
-    contrib = internal_containing_vec(s, u, lL, t, rbp) + internal_containing_vec(s, u, lR, t, rbp)
-    return float(np.sum(p * contrib))
+    contrib = internal_containing_vec(ss, u, lL, t, rbp) + internal_containing_vec(ss, u, lR, t, rbp)
+    return float(np.sum(ps * contrib))
 
 # r_func = r
 
@@ -1651,6 +1648,8 @@ def get_Bs(u, ss, ps, r_func, focal_positions, tol, grid_pts = 100):
     RLU = r_func(LU)                  # (E,) 
     RB  = (RLU - RLL) / (LU - LL)              # (E,) recomb per bp within exon
     
+    ss = np.asarray(ss, np.float64) 
+    ps = np.asarray(ps, np.float64)
     
     # startTime = datetime.now()
     recDist = getRecDist_3(positions, r_func, focal_positions) # (F,E) recDist[i, j] is distance between focal_positions[i] and positions[j]
@@ -1663,30 +1662,40 @@ def get_Bs(u, ss, ps, r_func, focal_positions, tol, grid_pts = 100):
     dt = 1e3
     
     for i,fp in enumerate(focal_positions):
-        rf = r_func(fp)
-        dL = np.abs(fp - LL)   # (E,) distance to left endpoint for all exons
-        dU = np.abs(fp - LU)   # (E,) distance to right endpoint
+        # rf = r_func(fp)
+        # dL = np.abs(fp - LL)   # (E,) distance to left endpoint for all exons
+        # dU = np.abs(fp - LU)   # (E,) distance to right endpoint
         
-        lb_all = np.minimum(dL, dU)   # (E,) nearer boundary distance (bp)
-        ub_all = np.maximum(dL, dU)   # (E,) farther boundary distance (bp)
-
-        B_log_at_t = make_B_log_evaluator_3case(recDist_i = recDist[i],  
+        # lb_all = np.minimum(dL, dU)   # (E,) nearer boundary distance (bp)
+        # ub_all = np.maximum(dL, dU)   # (E,) farther boundary distance (bp)
+        
+        B_log_at_t = make_B_log_evaluator_2case(recDist_i = recDist[i], 
                                                 fp = fp,
-                                                R_cutoff = 0.01,
-                                                ss = ss, 
-                                                ps = ps, 
+                                                ss = ss,
+                                                ps = ps,
                                                 LL = LL,
                                                 LU = LU,
                                                 MU = MU,
-                                                RLL = RLL, 
-                                                RLU = RLU,
                                                 RB = RB,
-                                                rf = rf,
-                                                scaledu = scaledu,
-                                                lb_all = lb_all,
-                                                ub_all = ub_all)
+                                                scaledu = scaledu)
+
+        # B_log_at_t = make_B_log_evaluator_3case(recDist_i = recDist[i],  s
+        #                                         fp = fp,
+        #                                         R_cutoff = 0.01,
+        #                                         ss = ss, 
+        #                                         ps = ps, 
+        #                                         LL = LL,
+        #                                         LU = LU,
+        #                                         MU = MU,
+        #                                         RLL = RLL, 
+        #                                         RLU = RLU,
+        #                                         RB = RB,
+        #                                         rf = rf,
+        #                                         scaledu = scaledu,
+        #                                         lb_all = lb_all,
+        #                                         ub_all = ub_all)
         
-        prev_logB = 0.0
+        prev_logB = 0.0 # TODO replace with equil time by doubling
         j = 0
         bvals = [1.0]
         
@@ -1706,44 +1715,55 @@ def get_Bs(u, ss, ps, r_func, focal_positions, tol, grid_pts = 100):
     # endTime - startTime
     return all_bs
                                                 
-                                                
-                                                
-                                                # all_bs = []
-                                                # dt = 1e3
-                                                
-                                                # for i,fp in enumerate(len(focal_positions)):
-                                                    
-                                                    
-                                                    
-                                                #     B_log_at_t = make_B_evaluator_for_focal(recDist[i], S_row, U_col, P_row) 
-                                                
-                                                #     prev_logB = 0.0
+# t_equil = find_equil_time_by_doubling(B_log_at_t, t0=dt, tol=tol)
+# bvals = eval_on_uniform_grid_with_padding(B_log_at_t, dt=dt, t_equil=t_equil)
+
+def find_equil_time_by_doubling(B_log_at_t, t0, tol, max_doubles=60):
+    # Start from t0, double until successive difference <= tol
+    t_low = 0.0
+    B_low = 1.0
+
+    t = t0
+    B_prev = B_low
+    for _ in range(max_doubles):
+        B = float(np.exp(B_log_at_t(t)))
+        if abs(B - B_prev) <= tol:
+            return t  # first time we consider equilibrated on this coarse search
+        B_prev = B
+        t *= 2.0
+    return t  # fallback (very slow-decaying focal)
+
+def eval_on_uniform_grid_with_padding(B_log_at_t, dt, t_equil):
+    n = int(np.ceil(t_equil / dt))
+    out = np.empty(n + 1, dtype=np.float64)
+    out[0] = 1.0
+    for j in range(1, n + 1):
+        out[j] = float(np.exp(B_log_at_t(j * dt)))
+    return out.tolist()
                                               
-                                                #     j = 0
-                                                #     bvals = [1.0]
-                                                    
-                                                #     found = False
-                                                
-                                                #     while True:
-                                                #         j += 1
-                                                #         t = j * dt
-                                                #         logB = B_log_at_t(t)
-                                                #         bvals.append(float(np.exp(logB)))
-                                                        
-                                                #         if float(np.exp(logB)) < 1e-5:
-                                                #             found = True
-                                                #             break
-                                                
-                                                #         if abs(np.exp(logB)-np.exp(prev_logB)) <= tol:   
-                                                #             break
-                                                #         prev_logB = logB
-                                                #     if found:
-                                                #         break
-                                                #     all_bs.append(bvals)
-                                                # endTime = datetime.now()
-                                                # endTime - startTime
-                                                
-                                                
+def make_B_log_evaluator_2case(recDist_i, fp, ss, ps, LL, LU, MU, RB, scaledu):
+    # contains mask
+    contains = (LL <= fp) & (fp <= LU) # TODO implement searchsorted???
+
+    # external is everything except the containing exon (or exons)
+    external = ~contains # TODO copy and flip one element
+
+    # external point-mass evaluator
+    ext_logB = make_external_logB_evaluator(recDist_i, scaledu, ss, ps, external)
+
+    idx_contains = np.nonzero(contains)[0]  # usually 0 or 1
+
+    def logB(t):
+        total = ext_logB(t)
+        if len(idx_contains) > 1:
+            raise ValueError("Multiple exons contain the focal site.")
+        if len(idx_contains) == 1:
+            j = idx_contains[0]
+            total += exon_contains_focal_log(ss, ps, MU[j], LL[j], LU[j], fp, RB[j], t)
+        return total
+
+    return logB
+
 # TODO now two case
 def make_B_log_evaluator_3case(
     recDist_i, fp, R_cutoff, ss, ps, LL, LU, MU, RLL, RLU, RB, rf, scaledu, lb_all, ub_all
@@ -1806,10 +1826,10 @@ def exon_nearby_log_with_r0_batch(ss, ps,
         return 0.0
 
     # Convert to arrays
-    s = np.asarray(ss, dtype=np.float64)[None, :]        # (1,K)
-    p = np.asarray(ps, dtype=np.float64)[None, :]        # (1,K)
+    s = ss[None, :]        # (1,K)
+    p = ps[None, :]        # (1,K)
 
-    lb  = np.asarray(lb_near,  dtype=np.float64)[:, None]  # (N,1)
+    lb  = np.asarray(lb_near,  dtype=np.float64)[:, None]  # (N,1) # TODO check if as array is needed when we deal with nearbys
     ub  = np.asarray(ub_near,  dtype=np.float64)[:, None]
     rbp = np.asarray(rbp_near, dtype=np.float64)[:, None]
     r0  = np.asarray(r0_near,  dtype=np.float64)[:, None]
@@ -2037,3 +2057,39 @@ cluster_scale_funs(u = exonMutMap,
 #                         ss = ss,
 #                         sampled_demes=sampled_demes,
 #                         g = demo)
+
+
+                           # all_bs = []
+                           # dt = 1e3
+                           
+                           # for i,fp in enumerate(len(focal_positions)):
+                               
+                               
+                               
+                           #     B_log_at_t = make_B_evaluator_for_focal(recDist[i], S_row, U_col, P_row) 
+                           
+                           #     prev_logB = 0.0
+                         
+                           #     j = 0
+                           #     bvals = [1.0]
+                               
+                           #     found = False
+                           
+                           #     while True:
+                           #         j += 1
+                           #         t = j * dt
+                           #         logB = B_log_at_t(t)
+                           #         bvals.append(float(np.exp(logB)))
+                                   
+                           #         if float(np.exp(logB)) < 1e-5:
+                           #             found = True
+                           #             break
+                           
+                           #         if abs(np.exp(logB)-np.exp(prev_logB)) <= tol:   
+                           #             break
+                           #         prev_logB = logB
+                           #     if found:
+                           #         break
+                           #     all_bs.append(bvals)
+                           # endTime = datetime.now()
+                           # endTime - startTime
