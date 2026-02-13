@@ -15,6 +15,10 @@ import warnings
 from typing import List
 from scipy.special import gamma, gammaincc, exp1
 from scipy.special import exp1  # exp1(x) = E1(x) = Γ(0, x) (upper incomplete gamma at a=0)
+from sklearn_extra.cluster import KMedoids
+from sklearn.metrics import silhouette_score
+
+
 
 os.chdir('/home/nathan/Documents/GitHub/BGSdemo/validation/fwdpy')
 from deme_funs import _get_demographic_events, _get_deme_sample_sizes, _get_root_Ne, _sizes_at_time, _migration_rate_in_interval, _compute_sfs, _reorder_fs
@@ -1375,7 +1379,100 @@ def cluster_scale_funs(u,
     endTime = datetime.now()
     endTime - startTime
     
+    startTime = datetime.now()
+    labels, medoids = cluster_B_kmedoids(D, K=20)
+    endTime = datetime.now()
+    endTime - startTime
     
+    startTime = datetime.now()
+    best_K, labels, medoids, scores = choose_k_kmedoids_silhouette(D, k_min=2, k_max=25)
+    endTime = datetime.now()
+    endTime - startTime
+    
+    plot_kmedoids_clusters(B_grid, labels, medoids)
+
+from sklearn.decomposition import PCA
+
+X = PCA(2).fit_transform(B_grid)
+
+plt.scatter(X[:,0], X[:,1], s=5)
+plt.xlabel("PC1")
+plt.ylabel("PC2")
+plt.show()
+
+def choose_k_kmedoids_silhouette(D, k_min=2, k_max=20, random_state=0):
+    """
+    Returns (best_K, best_labels, best_medoids, scores_dict)
+    D: (F,F) distance matrix (squared distances are OK; monotone transform preserves ordering reasonably)
+    """
+    D = np.asarray(D, dtype=np.float64)
+    best = (-np.inf, None, None, None)  # (score, K, labels, medoids)
+    scores = {}
+
+    for K in range(k_min, k_max + 1):
+        kmed = KMedoids(
+            n_clusters=K,
+            metric="precomputed",
+            init="k-medoids++",
+            random_state=random_state
+        )
+        labels = kmed.fit_predict(D)
+
+        # Silhouette requires at least 2 clusters and not all points in one cluster
+        if len(np.unique(labels)) < 2:
+            scores[K] = -np.inf
+            continue
+
+        score = silhouette_score(D, labels, metric="precomputed")
+        scores[K] = score
+
+        if score > best[0]:
+            best = (score, K, labels, kmed.medoid_indices_)
+
+    best_score, best_K, best_labels, best_medoids = best
+    return best_K, best_labels, best_medoids, scores
+
+
+def plot_kmedoids_clusters(B, labels, medoids, max_curves=50):
+    """
+    B        : (F,T) matrix of B(t) curves
+    labels   : cluster labels for each curve
+    medoids  : indices of medoid curves (length K)
+    """
+
+    K = len(medoids)
+
+    for c in range(K):
+        idx = np.where(labels == c)[0]
+
+        plt.figure(figsize=(6,4))
+
+        # plot some member curves (light)
+        for i in idx[:max_curves]:
+            plt.plot(B[i], color='gray', alpha=0.25)
+
+        # plot medoid (bold)
+        m = medoids[c]
+        plt.plot(B[m], color='red', lw=3)
+
+        plt.title(f"Cluster {c} (n={len(idx)})")
+        plt.xlabel("time index")
+        plt.ylabel("B(t)")
+        plt.tight_layout()
+        plt.show()
+
+def cluster_B_kmedoids(D, K, random_state=0):
+    kmed = KMedoids(
+        n_clusters=K,
+        metric='precomputed',
+        init='k-medoids++',
+        random_state=random_state
+    )
+
+    labels = kmed.fit_predict(D)
+    medoids = kmed.medoid_indices_
+
+    return labels, medoids
 
 def pairwise_ssd(B):
     """
@@ -1394,8 +1491,8 @@ def pairwise_ssd(B):
 
     # numerical cleanup: tiny negative values to 0
     np.maximum(D, 0.0, out=D)
+    np.fill_diagonal(D, 0) # correct for small nonzer values due to numerical precision
     return D
-
 
 def ragged_to_rect_repeat_last(all_bs, dtype=np.float64):
     F = len(all_bs)
@@ -1598,7 +1695,7 @@ def get_Bs(u, ss, ps, r_func, focal_positions, tol, grid_pts = 100):
             j += 1
             t = j * dt
             logB = B_log_at_t(t)
-            bvals.append(float(np.exp(logB)))
+            bvals.append(float(np.exp(logB))) # TODO can reduce calls to exp
             
             if abs(np.exp(logB)-np.exp(prev_logB)) <= tol: 
                 equil = True
@@ -1775,7 +1872,8 @@ mutMap = simplify_rate_map(mutMap)
 
 exonMutMap, U = make_exon_only_mutmap(mutMap, exonMap) 
 
-focal_positions = get_pred_loci(int(1e3), recMap)
+focal_positions = [(x+y)/2 for x,y in exonMap][1::4]
+# focal_positions = get_pred_loci(int(1e3), recMap)
 
 # 875 / 2 / 12378 * shape to get the 0.006 number
 mean = 0.00657416 / 2
