@@ -13,10 +13,11 @@ from scipy import interpolate
 import warnings
 # from __future__ import annotations
 from typing import List
-from scipy.special import gamma, gammaincc, exp1
-from scipy.special import exp1  # exp1(x) = E1(x) = Γ(0, x) (upper incomplete gamma at a=0)
+from scipy.special import gamma, gammaincc, exp1 # exp1(x) = E1(x) = Γ(0, x) (upper incomplete gamma at a=0)
 from sklearn_extra.cluster import KMedoids
 from sklearn.metrics import silhouette_score
+from sklearn.preprocessing import StandardScaler
+
 
 
 
@@ -1374,6 +1375,12 @@ def cluster_scale_funs(u,
     endTime = datetime.now()
     endTime - startTime
     
+    B_inf, half_time, half_index = compute_Binf_and_halftime(B_grid, dt = 1e3)
+    
+    features = np.column_stack([B_inf, half_time])
+
+    labels, medoids, model, X = kmedoids_on_features(features, K=20)
+    
     startTime = datetime.now()
     D = pairwise_ssd(B_grid)
     endTime = datetime.now()
@@ -1390,6 +1397,8 @@ def cluster_scale_funs(u,
     endTime - startTime
     
     plot_kmedoids_clusters(B_grid, labels, medoids)
+    
+    # TODO try feature clustering?
 
 # from sklearn.decomposition import PCA
 
@@ -1400,12 +1409,52 @@ def cluster_scale_funs(u,
 # plt.ylabel("PC2")
 # plt.show()
 
+# plt.scatter(X[:,0], X[:,1], c=labels, s=5)
+# plt.show()
+
+def kmedoids_on_features(features, K, random_state=0):
+    X = StandardScaler().fit_transform(features)  # recommended
+    model = KMedoids(
+        n_clusters=K,
+        metric="euclidean",
+        init="k-medoids++",
+        random_state=random_state
+    )
+    labels = model.fit_predict(X)
+    medoids = model.medoid_indices_
+    return labels, medoids, model, X
+
+
+def compute_Binf_and_halftime(B_rect, dt = 1e3):
+    """
+    B_rect: (F,T) padded rectangular array, monotone decreasing to B_inf
+    dt: time step size (in generations, or whatever units you're using)
+
+    Returns:
+      B_inf: (F,)
+      half_time: (F,) in same time units as dt
+      half_index: (F,) indices on the grid (0..T-1)
+    """
+    B = np.asarray(B_rect, dtype=np.float64)
+    F, T = B.shape
+
+    B_inf = B[:, -1]                         # (F,)
+    thresh = 0.5 * (1.0 + B_inf)             # (F,)
+
+    # first index where B <= threshold
+    # If a curve never crosses (shouldn't if it decays), set to T-1.
+    crossed = B <= thresh[:, None]           # (F,T) boolean
+    half_index = np.where(crossed.any(axis=1), crossed.argmax(axis=1), T - 1)
+
+    half_time = half_index.astype(np.float64) * float(dt)
+    return B_inf, half_time, half_index
+
+
 def choose_k_kmedoids_silhouette(D, k_min=2, k_max=20, random_state=0):
     """
     Returns (best_K, best_labels, best_medoids, scores_dict)
     D: (F,F) distance matrix (squared distances are OK; monotone transform preserves ordering reasonably)
     """
-    D = np.asarray(D, dtype=np.float64) # TODO check if as array call is needed again
     best = (-np.inf, None, None, None)  # (score, K, labels, medoids)
     scores = {}
 
@@ -1538,34 +1587,32 @@ def internal_containing_vec(s, u, l, t, r):
     if t <= 0:
         return np.zeros_like(s, dtype=np.float64)
 
-    lr = l * r # scalar
-    denom = lr + s #scalar
+    lr = l * r                     # scalar
+    denom = lr + s                 # (K,)
 
     # ---- Exponential pieces (K,) ----
-    e_lr_s  = np.exp(-(lr + s) * t)
-    e2_lr_s = np.exp(-2.0 * (lr + s) * t)
+    e_lr_s  = np.exp(-denom * t)
+    e2_lr_s = np.exp(-2.0 * denom * t)
     e_s     = np.exp(-s * t)
     e2_s    = np.exp(-2.0 * s * t)
-    
+
     # ---- Rational/exponential bracket A(s)/(lr+s) ----
     frac_term = (-(lr)
                  + s * e2_lr_s
                  - 2.0 * s * e_lr_s
-                 - (lr + s) * e2_s
-                 + 2.0 * (lr + s) * e_s) / denom
+                 - denom * e2_s
+                 + 2.0 * denom * e_s) / denom
 
     # ---- Γ(0, x) terms (upper incomplete gamma at a=0) ----
     #  inc_gamma(0, x) equals exp1(x).
-    st = s * t
-    x1 = st
-    x2 = 2.0 * st
-    x3 = (lr + s) * t
-    x4 = 2.0 * (lr + s) * t
-
+    x1 = s * t
+    x2 = 2.0 * s * t
+    x3 = denom * t
+    x4 = 2.0 * denom * t
 
     gamma_term = (-2.0 * s * t * exp1(x1)
-                   + 2.0 * s * t * exp1(x2)
-                   + 2.0 * s * t * (exp1(x3) - exp1(x4)))
+                  + 2.0 * s * t * exp1(x2)
+                  + 2.0 * s * t * (exp1(x3) - exp1(x4)))
 
     return (u * (frac_term + gamma_term)) / r
 
@@ -1632,6 +1679,218 @@ def exon_contains_focal_log(ss, ps, u, ll, lu, focalPos, rbp, t):
     return float(np.sum(ps * contrib))
 
 # r_func = r
+# exons = u
+# dt = 1e3
+# R_cutoff = 0.01
+# max_steps = int(2e5)
+
+# -----------------------------------------
+# Main: compute only B_inf and half_time
+# -----------------------------------------
+
+def get_Binf_and_halftime(exons, ss, ps, r_func, focal_positions,
+                          dt=1e3, R_cutoff=0.01, max_steps=200000):
+    """
+    exons: array-like (E,3) rows [start, stop, local_mu_per_bp]
+    Returns:
+      B_inf: (F,)
+      half_time: (F,) (in same units as dt), np.nan if not reached within max_steps
+      half_index: (F,) index j where crossing first occurs (so t = j*dt)
+    """
+    ex = np.asarray(exons, dtype=np.float64) # (E,3)
+    LL = ex[:, 0] # (E,) start positions
+    LU = ex[:, 1] # (E,) start positions
+    MU = ex[:, 2] # (E,) start positions
+
+    positions = 0.5 * (LL + LU) # (E,) point mass positions
+    scaledu = (LU - LL) * MU # (E,) point mass weights
+
+    # Precompute endpoint r-values and within-exon rbp
+    RLL = r_func(LL)
+    RLU = r_func(LU)
+    RB = (RLU - RLL) / (LU - LL)
+
+    # Precompute r at point-mass positions (for recDist per focal)
+    recDist = getRecDist_3(positions, r_func, focal_positions) # (F,E) recDist[i, j] is distance between focal_positions[i] and positions[j]
+
+    ss = np.asarray(ss, np.float64)
+    ps = np.asarray(ps, np.float64)
+
+    F = len(focal_positions)
+    B_inf = np.empty(F, dtype=np.float64)
+    half_time = np.full(F, np.nan, dtype=np.float64)
+    half_index = np.full(F, -1, dtype=np.int64)
+
+    for i, fp in enumerate(focal_positions):
+        fp = float(fp)
+        rf = float(r_func(fp))
+        recDist_i = recDist[i]
+
+        # Build 3-case evaluator 
+        B_log_at_t, idx_contains, idx_nearby, ext_mask = make_B_log_evaluator_3case(
+            recDist_i=recDist_i, fp=fp, R_cutoff=R_cutoff,
+            ss=ss, ps=ps, LL=LL, LU=LU, MU=MU, RLL=RLL, RLU=RLU, RB=RB, rf=rf,
+            scaledu=scaledu
+        )
+
+        # ---- B_inf using t->inf limits (3 cases) ----
+        log_inf = 0.0
+        log_inf += logB_inf_external(recDist_i, scaledu, ss, ps, ext_mask)
+        log_inf += logB_inf_contains(fp, LL, LU, MU, RB, ss, ps, idx_contains)
+        log_inf += logB_inf_nearby(fp, LL, LU, MU, RB, RLL, RLU, rf, ss, ps, idx_nearby)
+
+        B_inf_i = float(np.exp(log_inf))
+        B_inf[i] = B_inf_i
+
+        # ---- half-time on uniform grid using full 3-case logB(t) ----
+        thresh = 0.5 * (1.0 + B_inf_i)
+
+        # If threshold is >= 1 (shouldn't), half-time is 0.
+        if thresh >= 1.0:
+            half_time[i] = 0.0
+            half_index[i] = 0
+            continue
+
+        # evaluate B(j*dt) sequentially until first crossing
+        for j in range(1, int(max_steps) + 1):
+            t = j * float(dt)
+            Bval = float(np.exp(B_log_at_t(t)))
+            if Bval <= thresh:
+                half_index[i] = j
+                half_time[i] = t
+                break
+
+    return B_inf, half_time, half_index
+
+def get_B_features(u, ss, ps, r_func, focal_positions, tol, grid_pts = 100, dt = 1e3):
+    # first define some variables that are reused often
+    ex = np.asarray(u, dtype=np.float64)   # (E,3)
+    LL = ex[:,0]                               # (E,) start positions
+    LU = ex[:,1]                               # (E,) end positions
+    MU = ex[:,2]                               # (E,) local mu per bp
+    
+    positions = 0.5*(LL + LU)                  # (E,) point mass positions
+    scaledu   = (LU - LL)*MU                   # (E,) point-mass weight
+    
+    # recombination map at exon endpoints (compute once)
+    RLL = r_func(LL)                  # (E,) 
+    RLU = r_func(LU)                  # (E,) 
+    RB  = (RLU - RLL) / (LU - LL)              # (E,) recomb per bp within exon
+    
+    ss = np.asarray(ss, np.float64) 
+    ps = np.asarray(ps, np.float64)
+    
+    # startTime = datetime.now()
+    recDist = getRecDist_3(positions, r_func, focal_positions) # (F,E) recDist[i, j] is distance between focal_positions[i] and positions[j]
+    # endTime = datetime.now()
+    # endTime - startTime
+    
+    # startTime = datetime.now()
+    
+    all_bs = []
+    
+    for i,fp in enumerate(focal_positions):
+        rf = r_func(fp)
+        dL = np.abs(fp - LL)   # (E,) distance to left endpoint for all exons
+        dU = np.abs(fp - LU)   # (E,) distance to right endpoint
+        
+        lb_all = np.minimum(dL, dU)   # (E,) nearer boundary distance (bp)
+        ub_all = np.maximum(dL, dU)   # (E,) farther boundary distance (bp)
+        
+        B_inf = make_B_inf(recDist_i = recDist[i],  
+                            fp = fp,
+                            R_cutoff = 0.01,
+                            ss = ss, 
+                            ps = ps, 
+                            LL = LL,
+                            LU = LU,
+                            MU = MU,
+                            RLL = RLL, 
+                            RLU = RLU,
+                            RB = RB,
+                            rf = rf,
+                            scaledu = scaledu,
+                            lb_all = lb_all,
+                            ub_all = ub_all)
+        
+        B_log_at_t = make_B_log_evaluator_2case(recDist_i = recDist[i], 
+                                                fp = fp,
+                                                ss = ss,
+                                                ps = ps,
+                                                LL = LL,
+                                                LU = LU,
+                                                MU = MU,
+                                                RB = RB,
+                                                scaledu = scaledu)
+        
+        prev_B = 1 
+        j = 0
+        bvals = [1.0]
+        
+        equil = False
+        while not equil:
+            j += 1
+            t = j * dt
+            B = float(np.exp(B_log_at_t(t)))
+            bvals.append(B) 
+            
+            if abs(B - prev_B) <= tol: 
+                equil = True
+            prev_B = B
+            
+        all_bs.append(bvals)
+    # endTime = datetime.now()
+    # endTime - startTime
+    return all_bs
+
+def make_b_inf(recDist_i, fp, R_cutoff, ss, ps, LL, LU, MU, RLL, RLU, RB, rf, scaledu, lb_all, ub_all):
+
+    # creating masks
+    #TODO deal with contains length >1 edge-case
+    contains = (LL <= fp) & (fp <= LU) # (E,)
+    nearby = (~contains) & (recDist_i <= R_cutoff)
+    external = (~contains) & (~nearby)
+    
+    # distance from fp to NEARER exon endpoint
+    r0 = np.minimum(np.abs(RLL - rf), np.abs(RLU - rf)) # (E,)
+    
+    # preparing lambda function for far away exons
+    ext_logB = make_external_logB_evaluator(recDist_i, scaledu, ss, ps, external)
+
+    # indices to evaluate over:
+    idx_contains = np.nonzero(contains)[0]      # length 0 or 1
+    # idx_nearby   = np.nonzero(nearby)[0]        # typically small
+
+    def logB(t):
+        # Case A: far away
+        total = ext_logB(t)
+
+        # Case B: containing exon
+        if len(idx_contains) > 1:
+            raise ValueError('Woah there, partner!')
+        for j in idx_contains:
+            total += exon_contains_focal_log(ss, ps, MU[j], LL[j], LU[j], fp, RB[j], t)
+
+        # # Case C: nearby non-containing exons
+        # if len(idx_nearby) > 0:
+        #     lb_near  = lb_all[idx_nearby]
+        #     ub_near  = ub_all[idx_nearby]
+        #     rbp_near = RB[idx_nearby]
+        #     r0_near  = r0[idx_nearby]
+        #     mu_near  = MU[idx_nearby]
+            
+        #     total += exon_nearby_log_with_r0_batch(
+        #                  ss, ps,
+        #                  mu_near, lb_near, ub_near,
+        #                  rbp_near, r0_near, t
+        #              )
+
+
+        return total
+
+    return logB   
+
+    return None
 
 def get_Bs(u, ss, ps, r_func, focal_positions, tol, grid_pts = 100):
     # first define some variables that are reused often
@@ -1678,6 +1937,30 @@ def get_Bs(u, ss, ps, r_func, focal_positions, tol, grid_pts = 100):
                                                 MU = MU,
                                                 RB = RB,
                                                 scaledu = scaledu)
+        
+        prev_B = 1 
+        j = 0
+        bvals = [1.0]
+        
+        equil = False
+        while not equil:
+            j += 1
+            t = j * dt
+            B = float(np.exp(B_log_at_t(t)))
+            bvals.append(B) 
+            
+            if abs(B - prev_B) <= tol: 
+                equil = True
+            prev_B = B
+            
+        all_bs.append(bvals)
+    # endTime = datetime.now()
+    # endTime - startTime
+    return all_bs
+                                                
+# t_equil = find_equil_time_by_doubling(B_log_at_t, t0=dt, tol=tol)
+# bvals = eval_on_uniform_grid_with_padding(B_log_at_t, dt=dt, t_equil=t_equil)
+
 
         # B_log_at_t = make_B_log_evaluator_3case(recDist_i = recDist[i],  s
         #                                         fp = fp,
@@ -1694,33 +1977,9 @@ def get_Bs(u, ss, ps, r_func, focal_positions, tol, grid_pts = 100):
         #                                         scaledu = scaledu,
         #                                         lb_all = lb_all,
         #                                         ub_all = ub_all)
-        
-        prev_logB = 0.0 # TODO replace with equil time by doubling
-        j = 0
-        bvals = [1.0]
-        
-        equil = False
-        while not equil:
-            j += 1
-            t = j * dt
-            logB = B_log_at_t(t)
-            bvals.append(float(np.exp(logB))) # TODO can reduce calls to exp
-            
-            if abs(np.exp(logB)-np.exp(prev_logB)) <= tol: 
-                equil = True
-            prev_logB = logB
-            
-        all_bs.append(bvals)
-    # endTime = datetime.now()
-    # endTime - startTime
-    return all_bs
-                                                
-# t_equil = find_equil_time_by_doubling(B_log_at_t, t0=dt, tol=tol)
-# bvals = eval_on_uniform_grid_with_padding(B_log_at_t, dt=dt, t_equil=t_equil)
 
 def find_equil_time_by_doubling(B_log_at_t, t0, tol, max_doubles=60):
     # Start from t0, double until successive difference <= tol
-    t_low = 0.0
     B_low = 1.0
 
     t = t0
@@ -1728,10 +1987,10 @@ def find_equil_time_by_doubling(B_log_at_t, t0, tol, max_doubles=60):
     for _ in range(max_doubles):
         B = float(np.exp(B_log_at_t(t)))
         if abs(B - B_prev) <= tol:
-            return t  # first time we consider equilibrated on this coarse search
+            return t  
         B_prev = B
         t *= 2.0
-    return t  # fallback (very slow-decaying focal)
+    return t  
 
 def eval_on_uniform_grid_with_padding(B_log_at_t, dt, t_equil):
     n = int(np.ceil(t_equil / dt))
@@ -1764,8 +2023,54 @@ def make_B_log_evaluator_2case(recDist_i, fp, ss, ps, LL, LU, MU, RB, scaledu):
 
     return logB
 
+def make_B_log_evaluator_3case(recDist_i, fp, R_cutoff,
+                               ss, ps, LL, LU, MU, RLL, RLU, RB, rf, scaledu):
+    """
+    Builds a per-focal logB(t) evaluator for half-time search.
+    """
+    # creating masks
+    #TODO deal with contains length >1 edge-case
+    contains = (LL <= fp) & (fp <= LU)
+    nearby = (~contains) & (recDist_i <= R_cutoff)
+    external = (~contains) & (~nearby)
+
+    ext_logB = make_external_logB_evaluator(recDist_i, scaledu, ss, ps, external)
+
+    idx_contains = np.nonzero(contains)[0]
+    idx_nearby = np.nonzero(nearby)[0]
+
+    near_logB = None
+    if idx_nearby.size > 0:
+        LLn = LL[idx_nearby]; LUn = LU[idx_nearby]
+        dL = np.abs(fp - LLn)
+        dU = np.abs(fp - LUn)
+        lb = np.minimum(dL, dU)
+        ub = np.maximum(dL, dU)
+
+        r0 = np.minimum(np.abs(RLL[idx_nearby] - rf), np.abs(RLU[idx_nearby] - rf))
+        near_logB = make_nearby_logB_evaluator(MU[idx_nearby], lb, ub, RB[idx_nearby], r0, ss, ps)
+
+    def logB(t):
+        # Case A: far away
+        total = ext_logB(t)
+
+        # Case B: containing exon
+        if idx_contains.size > 1:
+            raise ValueError("Multiple exons contain focal site; handle overlaps explicitly.")
+        if idx_contains.size == 1:
+            j = int(idx_contains[0])
+            total += exon_contains_focal_log(ss, ps, MU[j], LL[j], LU[j], fp, RB[j], t)
+
+        if near_logB is not None:
+            total += near_logB(t)
+
+        return total
+
+    return logB, idx_contains, idx_nearby, external
+
+
 # TODO now two case
-def make_B_log_evaluator_3case(
+def make_B_log_evaluator_3case_dep(
     recDist_i, fp, R_cutoff, ss, ps, LL, LU, MU, RLL, RLU, RB, rf, scaledu, lb_all, ub_all
 ):
     # creating masks
@@ -1812,6 +2117,84 @@ def make_B_log_evaluator_3case(
         return total
 
     return logB   
+
+def make_nearby_logB_evaluator(mu_near, lb_near, ub_near, rbp_near, r0_near, ss, ps):
+    """
+    Time-dependent nearby evaluator with r0, batch over nearby exons and s-bins.
+    Precomputes t-independent arrays; each call still does exp/exp1.
+    """
+    # Convert to arrays
+    s = ss[None, :]        # (1,K)
+    p = ps[None, :]        # (1,K)
+
+    lb  = lb_near[:, None]  # (N,1)
+    ub  = ub_near[:, None]
+    rbp = rbp_near[:, None]
+    r0  = r0_near[:, None]
+    mu  = mu_near[:, None]
+
+    # precompute common terms:
+    lb_r = lb * rbp   # (N,1)
+    ub_r = ub * rbp
+    mu_over_r = mu / rbp
+
+    a0 = lb_r + r0 + s # (N,K)
+    b0 = r0 + s + ub_r
+    denom = a0 * b0
+
+    # reusable temp arrays to avoid reallocations each time
+    tmp = np.empty_like(a0) # (N,K)
+    e_tb  = np.empty_like(a0)
+    e2_tb = np.empty_like(a0)
+    e_ta  = np.empty_like(a0)
+    e2_ta = np.empty_like(a0)
+
+    E1_at  = np.empty_like(a0)
+    E1_2at = np.empty_like(a0)
+    E1_bt  = np.empty_like(a0)
+    E1_2bt = np.empty_like(a0)
+
+    numer = np.empty_like(a0)
+    frac = np.empty_like(a0)
+    inside = np.empty_like(a0)
+
+    def near_logB(t):
+        t = float(t)
+        if t <= 0.0:
+            return 0.0
+
+        # Exponentials (N,K)
+        np.multiply(b0, -t, out=tmp);      np.exp(tmp, out=e_tb) # exp(-t * b)
+        np.multiply(b0, -2.0*t, out=tmp);  np.exp(tmp, out=e2_tb) # exp(-2 * t * b)
+        np.multiply(a0, -t, out=tmp);      np.exp(tmp, out=e_ta) # exp(-t * a)
+        np.multiply(a0, -2.0*t, out=tmp);  np.exp(tmp, out=e2_ta) # exp(-2 * t * a)
+
+        # Gamma terms (N,K)
+        E1_at[:]  = exp1(a0 * t)
+        E1_2at[:] = exp1(2.0 * a0 * t)
+        E1_bt[:]  = exp1(b0 * t)
+        E1_2bt[:] = exp1(2.0 * b0 * t)
+
+        # numer = -(lb*r) - a0*e2tb + 2*a0*etb + (ub*r) + b0*e2ta - 2*b0*eta
+        numer[:] = -lb_r
+        numer += -a0 * e2_tb
+        numer +=  2.0 * a0 * e_tb
+        numer +=  ub_r
+        numer +=  b0 * e2_ta
+        numer += -2.0 * b0 * e_ta
+
+        np.divide(numer, denom, out=frac, where=(denom != 0.0))
+
+        inside[:] = frac
+        inside +=  2.0 * t * E1_at
+        inside += -2.0 * t * E1_2at
+        inside +=  2.0 * t * (-E1_bt + E1_2bt)
+
+        # contrib = -(s * mu * inside) / rbp, with p weights
+        return float(np.sum((-s) * mu_over_r * inside * p))
+
+    return near_logB
+
 
 # TODO rename
 def exon_nearby_log_with_r0_batch(ss, ps,
@@ -1875,6 +2258,108 @@ def get_pred_loci(n_pos, r):
     loci = np.linspace(r[0][0], r[-1][-2], n_pos + 2)
     return loci[1:-1]
     
+
+# ----------------------------
+# t->infty limits (log-space)
+# ----------------------------
+
+def logB_inf_external(recDist_i, scaledu, ss, ps, ext_mask):
+    """
+    external limit:  -(s*u)/(s + r)^2  summed over exons and DFE bins.
+    Here r is recDist_i for point-mass positions.
+    """
+    U = np.asarray(scaledu, np.float64)[ext_mask][:, None]  # (Mext,1)
+    R = np.asarray(recDist_i, np.float64)[ext_mask][:, None]# (Mext,1)
+    s = np.asarray(ss, np.float64)[None, :]                 # (1,K)
+    p = np.asarray(ps, np.float64)[None, :]                 # (1,K)
+
+    D = R + s                                               # (Mext,K)
+    invD = np.divide(1.0, D, out=np.zeros_like(D), where=(D != 0.0))
+    term = (-U) * s * (invD * invD)                          # -(u*s)/(r+s)^2
+    return float(np.sum(term * p))
+
+
+def logB_inf_contains(fp, LL, LU, MU, RB, ss, ps, idx_contains):
+    """
+    containing limit (evaluated twice, left and right):
+        - (l * u) / (l*r + s)
+    where:
+      l = distance from focal to endpoint (bp)
+      u = MU (local mu per bp for the exon)
+      r = RB (recomb per bp within the exon)
+    """
+    if idx_contains.size == 0:
+        return 0.0
+    if idx_contains.size > 1:
+        raise ValueError("Multiple exons contain focal site; handle overlaps explicitly.")
+
+    j = int(idx_contains[0])
+    ll, lu = float(LL[j]), float(LU[j])
+    u = float(MU[j])
+    r = float(RB[j])
+
+    lL = fp - ll
+    lR = lu - fp
+
+    s = np.asarray(ss, np.float64)
+    p = np.asarray(ps, np.float64)
+
+    # left:  -(lL*u)/(lL*r + s), right: -(lR*u)/(lR*r + s)
+    denomL = lL * r + s
+    denomR = lR * r + s
+    termL = - (lL * u) * np.divide(1.0, denomL, out=np.zeros_like(s), where=(denomL != 0.0))
+    termR = - (lR * u) * np.divide(1.0, denomR, out=np.zeros_like(s), where=(denomR != 0.0))
+    return float(np.sum(p * (termL + termR)))
+
+
+def logB_inf_nearby(fp, LL, LU, MU, RB, RLL, RLU, rf, ss, ps, idx_nearby):
+    """
+    nearby limit:
+        (s*u*(lb - ub)) / ((lb*r + r0 + s) * (r0 + s + r*ub))
+
+    where:
+      lb, ub are bp distances from focal to nearer/farther exon boundary
+      r  = rbp within exon
+      r0 = recomb distance from focal to nearer boundary (in your r-space)
+      u  = MU (local mu per bp)
+    Note lb-ub < 0, so term is negative.
+    """
+    if idx_nearby.size == 0:
+        return 0.0
+
+    s = np.asarray(ss, np.float64)[None, :]   # (1,K)
+    p = np.asarray(ps, np.float64)[None, :]   # (1,K)
+
+    j = idx_nearby
+    LLn = LL[j]; LUn = LU[j]
+    mu  = MU[j][:, None]     # (N,1)
+    rbp = RB[j][:, None]     # (N,1)
+
+    dL = np.abs(fp - LLn)
+    dU = np.abs(fp - LUn)
+    lb = np.minimum(dL, dU)[:, None]          # (N,1)
+    ub = np.maximum(dL, dU)[:, None]          # (N,1)
+
+    # r0 from precomputed endpoint r-values
+    r0 = np.minimum(np.abs(RLL[j] - rf), np.abs(RLU[j] - rf))[:, None]  # (N,1)
+
+    a = lb * rbp + r0 + s                      # (N,K)
+    b = r0 + s + ub * rbp                      # (N,K)
+
+    denom = a * b
+    numer = s * mu * (lb - ub)                 # (N,K) via broadcast (lb-ub) (N,1)
+
+    term = np.divide(numer, denom, out=np.zeros_like(denom), where=(denom != 0.0))
+    return float(np.sum(term * p))
+
+
+
+
+
+
+
+
+
 
 # TODO almost all time spent in nearby
 
