@@ -17,6 +17,8 @@ from scipy.special import gamma, gammaincc, exp1 # exp1(x) = E1(x) = Γ(0, x) (u
 from sklearn_extra.cluster import KMedoids
 from sklearn.metrics import silhouette_score
 from sklearn.preprocessing import StandardScaler
+from sklearn.metrics import adjusted_rand_score
+
 
 
 
@@ -1363,42 +1365,80 @@ def cluster_scale_funs(u,
     if not isinstance(tol, (int, float)):
         raise ValueError('tol must be float or int') 
     if (type(focal_positions) is not list and type(focal_positions) is not np.ndarray) or not isinstance(focal_positions[0], (int, float)):
-            raise ValueError('focal_positions must be a list of int or float')
+        raise ValueError('focal_positions must be a list of int or float')
+        
     
+    # directly computing features        
     startTime = datetime.now()
-    B_grid = get_Bs(u, ss, ps, r, focal_positions, tol)
+    B_inf, half_time, half_index = get_Binf_and_halftime(u, ss, ps, r, focal_positions, dt=1e4, R_cutoff=0, max_steps=200000)
     endTime = datetime.now()
     endTime - startTime
-    
-    startTime = datetime.now()
-    B_grid = ragged_to_rect_repeat_last(B_grid)
-    endTime = datetime.now()
-    endTime - startTime
-    
-    B_inf, half_time, half_index = compute_Binf_and_halftime(B_grid, dt = 1e3)
-    
+            
     features = np.column_stack([B_inf, half_time])
-
     labels, medoids, model, X = kmedoids_on_features(features, K=20)
     
+    sil_feat = silhouette_score(X, labels, metric='euclidean')
+    ari_feat = ari_stability_test(lambda X: cluster_features(X, K=20), features)
+    plot_kmedoids_clusters(B_rect, labels, medoids)
+
+    features = np.column_stack([B_inf, np.log10(half_time)])
+    labels, medoids, model, X = kmedoids_on_features(features, K=20)
+    sil_feat_log = silhouette_score(X, labels, metric='euclidean')
+    ari_feat_log = ari_stability_test(lambda X: cluster_features(X, K=20), features)
+
+    ###########
+    
+    # from full B matrix
     startTime = datetime.now()
-    D = pairwise_ssd(B_grid)
+    B_grid = get_Bs(u, ss, ps, r, focal_positions, tol, dt=1e4, R_cutoff=0)
     endTime = datetime.now()
     endTime - startTime
+    B_rect = ragged_to_rect_repeat_last(B_grid)
+    D = pairwise_ssd(B_rect)
     
-    startTime = datetime.now()
+    
     labels, medoids = cluster_B_kmedoids(D, K=20)
-    endTime = datetime.now()
-    endTime - startTime
+
+    sil_curve = silhouette_score(D, labels, metric='precomputed')
+    ari_curve = ari_stability_precomputed(lambda Dsub: cluster_curves(Dsub, K=20), D)
+    plot_kmedoids_clusters(B_rect, labels, medoids)
+
+    sil_vals = []
+    ari_vals = []
+    for kk in range(2,40):
+        features = np.column_stack([B_inf, half_time])
+        labels, medoids, model, X = kmedoids_on_features(features, K=kk)
+        
+        sil_feat = silhouette_score(X, labels, metric='euclidean')
+        ari_feat = ari_stability_test(lambda X: cluster_features(X, K=kk), features)
+
+        features = np.column_stack([B_inf, np.log10(half_time)])
+        labels, medoids, model, X = kmedoids_on_features(features, K=kk)
+        sil_feat_log = silhouette_score(X, labels, metric='euclidean')
+        ari_feat_log = ari_stability_test(lambda X: cluster_features(X, K=kk), features)
+        
+        labels, medoids = cluster_B_kmedoids(D, K=kk)
+
+        sil_curve = silhouette_score(D, labels, metric='precomputed')
+        ari_curve = ari_stability_precomputed(lambda Dsub: cluster_curves(Dsub, K=kk), D)
+        
+        sil_vals.append([sil_feat, sil_feat_log, sil_curve])
+        ari_vals.append([ari_feat, ari_feat_log, ari_curve])
     
-    startTime = datetime.now()
-    best_K, labels, medoids, scores = choose_k_kmedoids_silhouette(D, k_min=2, k_max=25)
-    endTime = datetime.now()
-    endTime - startTime
+    # B_inf, half_time, half_index = compute_Binf_and_halftime(B_grid, dt = 1e3)
     
-    plot_kmedoids_clusters(B_grid, labels, medoids)
+    # features = np.column_stack([B_inf, half_time])
+
+    # labels, medoids, model, X = kmedoids_on_features(features, K=20)
     
-    # TODO try feature clustering?
+
+    
+    # startTime = datetime.now()
+    # best_K, labels, medoids, scores = choose_k_kmedoids_silhouette(D, k_min=2, k_max=25)
+    # endTime = datetime.now()
+    # endTime - startTime
+    
+    
 
 # from sklearn.decomposition import PCA
 
@@ -1412,6 +1452,87 @@ def cluster_scale_funs(u,
 # plt.scatter(X[:,0], X[:,1], c=labels, s=5)
 # plt.show()
 
+def cluster_curves(D, K=2):
+    model = KMedoids(n_clusters=K, metric="precomputed", random_state=0)
+    return model.fit_predict(D)
+
+def cluster_features(features, K=2):
+    X = StandardScaler().fit_transform(features)
+    model = KMedoids(n_clusters=K, metric="euclidean", random_state=0)
+    return model.fit_predict(X)
+
+def ari_stability_precomputed(cluster_func, D, n_runs=20, subsample_frac=0.8, random_state=0):
+    """
+    ARI stability for clustering functions that take a PRECOMPUTED distance matrix D (NxN).
+    """
+    rng = np.random.default_rng(random_state)
+    N = D.shape[0]
+    if D.shape[1] != N:
+        raise ValueError("D must be square (N,N).")
+
+    labels_full = cluster_func(D)
+    ari_scores = np.empty(n_runs, dtype=np.float64)
+
+    for r in range(n_runs):
+        idx = rng.choice(N, size=int(subsample_frac * N), replace=False)
+        idx.sort()
+
+        D_sub = D[np.ix_(idx, idx)]          # <-- key fix: square submatrix
+        labels_sub = cluster_func(D_sub)
+
+        ari_scores[r] = adjusted_rand_score(labels_full[idx], labels_sub)
+
+    return ari_scores
+
+def ari_stability_features(cluster_func, X, n_runs=20, subsample_frac=0.8, random_state=0):
+    """
+    ARI stability for clustering functions that take a FEATURE matrix X (N,d).
+    """
+    rng = np.random.default_rng(random_state)
+    N = X.shape[0]
+
+    labels_full = cluster_func(X)
+    ari_scores = np.empty(n_runs, dtype=np.float64)
+
+    for r in range(n_runs):
+        idx = rng.choice(N, size=int(subsample_frac * N), replace=False)
+        idx.sort()
+
+        X_sub = X[idx]
+        labels_sub = cluster_func(X_sub)
+
+        ari_scores[r] = adjusted_rand_score(labels_full[idx], labels_sub)
+
+    return ari_scores
+
+def ari_stability_test(cluster_func, data, n_runs=20, subsample_frac=0.8, random_state=0):
+    """
+    cluster_func: function that takes data_subset and returns labels
+    data: full dataset (features or distance matrix)
+    n_runs: number of subsampling trials
+    subsample_frac: fraction of data to keep
+    """
+    rng = np.random.default_rng(random_state)
+    N = len(data)
+
+    # Full clustering
+    labels_full = cluster_func(data)
+
+    ari_scores = []
+
+    for _ in range(n_runs):
+        idx = rng.choice(N, size=int(subsample_frac * N), replace=False)
+
+        data_sub = data[idx] if data.ndim == 2 else data[np.ix_(idx, idx)]
+
+        labels_sub = cluster_func(data_sub)
+
+        # Compare only overlapping points
+        ari = adjusted_rand_score(labels_full[idx], labels_sub)
+        ari_scores.append(ari)
+
+    return np.array(ari_scores)
+
 def kmedoids_on_features(features, K, random_state=0):
     X = StandardScaler().fit_transform(features)  # recommended
     model = KMedoids(
@@ -1423,7 +1544,6 @@ def kmedoids_on_features(features, K, random_state=0):
     labels = model.fit_predict(X)
     medoids = model.medoid_indices_
     return labels, medoids, model, X
-
 
 def compute_Binf_and_halftime(B_rect, dt = 1e3):
     """
@@ -1448,7 +1568,6 @@ def compute_Binf_and_halftime(B_rect, dt = 1e3):
 
     half_time = half_index.astype(np.float64) * float(dt)
     return B_inf, half_time, half_index
-
 
 def choose_k_kmedoids_silhouette(D, k_min=2, k_max=20, random_state=0):
     """
@@ -1480,7 +1599,6 @@ def choose_k_kmedoids_silhouette(D, k_min=2, k_max=20, random_state=0):
 
     best_score, best_K, best_labels, best_medoids = best
     return best_K, best_labels, best_medoids, scores
-
 
 def plot_kmedoids_clusters(B, labels, medoids, max_curves=50):
     """
@@ -1663,7 +1781,6 @@ def make_external_logB_evaluator(recDist_i, scaledu, ss, ps, ext_mask):
 # ax.set_ylabel("B(t)")
 # ax.legend(); 
 
-
 def exon_contains_focal_log(ss, ps, u, ll, lu, focalPos, rbp, t):
     """
     Log-contribution for an exon [ll, lu] that CONTAINS the focal site.
@@ -1762,7 +1879,7 @@ def get_Binf_and_halftime(exons, ss, ps, r_func, focal_positions,
 
     return B_inf, half_time, half_index
 
-def get_B_features(u, ss, ps, r_func, focal_positions, tol, grid_pts = 100, dt = 1e3):
+def get_Bs(u, ss, ps, r_func, focal_positions, tol, dt = 1e3, R_cutoff = 0.01):
     # first define some variables that are reused often
     ex = np.asarray(u, dtype=np.float64)   # (E,3)
     LL = ex[:,0]                               # (E,) start positions
@@ -1791,152 +1908,27 @@ def get_B_features(u, ss, ps, r_func, focal_positions, tol, grid_pts = 100, dt =
     
     for i,fp in enumerate(focal_positions):
         rf = r_func(fp)
-        dL = np.abs(fp - LL)   # (E,) distance to left endpoint for all exons
-        dU = np.abs(fp - LU)   # (E,) distance to right endpoint
-        
-        lb_all = np.minimum(dL, dU)   # (E,) nearer boundary distance (bp)
-        ub_all = np.maximum(dL, dU)   # (E,) farther boundary distance (bp)
-        
-        B_inf = make_B_inf(recDist_i = recDist[i],  
-                            fp = fp,
-                            R_cutoff = 0.01,
-                            ss = ss, 
-                            ps = ps, 
-                            LL = LL,
-                            LU = LU,
-                            MU = MU,
-                            RLL = RLL, 
-                            RLU = RLU,
-                            RB = RB,
-                            rf = rf,
-                            scaledu = scaledu,
-                            lb_all = lb_all,
-                            ub_all = ub_all)
-        
-        B_log_at_t = make_B_log_evaluator_2case(recDist_i = recDist[i], 
-                                                fp = fp,
-                                                ss = ss,
-                                                ps = ps,
-                                                LL = LL,
-                                                LU = LU,
-                                                MU = MU,
-                                                RB = RB,
-                                                scaledu = scaledu)
-        
-        prev_B = 1 
-        j = 0
-        bvals = [1.0]
-        
-        equil = False
-        while not equil:
-            j += 1
-            t = j * dt
-            B = float(np.exp(B_log_at_t(t)))
-            bvals.append(B) 
-            
-            if abs(B - prev_B) <= tol: 
-                equil = True
-            prev_B = B
-            
-        all_bs.append(bvals)
-    # endTime = datetime.now()
-    # endTime - startTime
-    return all_bs
-
-def make_b_inf(recDist_i, fp, R_cutoff, ss, ps, LL, LU, MU, RLL, RLU, RB, rf, scaledu, lb_all, ub_all):
-
-    # creating masks
-    #TODO deal with contains length >1 edge-case
-    contains = (LL <= fp) & (fp <= LU) # (E,)
-    nearby = (~contains) & (recDist_i <= R_cutoff)
-    external = (~contains) & (~nearby)
-    
-    # distance from fp to NEARER exon endpoint
-    r0 = np.minimum(np.abs(RLL - rf), np.abs(RLU - rf)) # (E,)
-    
-    # preparing lambda function for far away exons
-    ext_logB = make_external_logB_evaluator(recDist_i, scaledu, ss, ps, external)
-
-    # indices to evaluate over:
-    idx_contains = np.nonzero(contains)[0]      # length 0 or 1
-    # idx_nearby   = np.nonzero(nearby)[0]        # typically small
-
-    def logB(t):
-        # Case A: far away
-        total = ext_logB(t)
-
-        # Case B: containing exon
-        if len(idx_contains) > 1:
-            raise ValueError('Woah there, partner!')
-        for j in idx_contains:
-            total += exon_contains_focal_log(ss, ps, MU[j], LL[j], LU[j], fp, RB[j], t)
-
-        # # Case C: nearby non-containing exons
-        # if len(idx_nearby) > 0:
-        #     lb_near  = lb_all[idx_nearby]
-        #     ub_near  = ub_all[idx_nearby]
-        #     rbp_near = RB[idx_nearby]
-        #     r0_near  = r0[idx_nearby]
-        #     mu_near  = MU[idx_nearby]
-            
-        #     total += exon_nearby_log_with_r0_batch(
-        #                  ss, ps,
-        #                  mu_near, lb_near, ub_near,
-        #                  rbp_near, r0_near, t
-        #              )
-
-
-        return total
-
-    return logB   
-
-    return None
-
-def get_Bs(u, ss, ps, r_func, focal_positions, tol, grid_pts = 100):
-    # first define some variables that are reused often
-    ex = np.asarray(u, dtype=np.float64)   # (E,3)
-    LL = ex[:,0]                               # (E,) start positions
-    LU = ex[:,1]                               # (E,) end positions
-    MU = ex[:,2]                               # (E,) local mu per bp
-    
-    positions = 0.5*(LL + LU)                  # (E,) point mass positions
-    scaledu   = (LU - LL)*MU                   # (E,) point-mass weight
-    
-    # recombination map at exon endpoints (compute once)
-    RLL = r_func(LL)                  # (E,) 
-    RLU = r_func(LU)                  # (E,) 
-    RB  = (RLU - RLL) / (LU - LL)              # (E,) recomb per bp within exon
-    
-    ss = np.asarray(ss, np.float64) 
-    ps = np.asarray(ps, np.float64)
-    
-    # startTime = datetime.now()
-    recDist = getRecDist_3(positions, r_func, focal_positions) # (F,E) recDist[i, j] is distance between focal_positions[i] and positions[j]
-    # endTime = datetime.now()
-    # endTime - startTime
-    
-    # startTime = datetime.now()
-    
-    all_bs = []
-    dt = 1e3
-    
-    for i,fp in enumerate(focal_positions):
-        # rf = r_func(fp)
         # dL = np.abs(fp - LL)   # (E,) distance to left endpoint for all exons
         # dU = np.abs(fp - LU)   # (E,) distance to right endpoint
         
         # lb_all = np.minimum(dL, dU)   # (E,) nearer boundary distance (bp)
         # ub_all = np.maximum(dL, dU)   # (E,) farther boundary distance (bp)
         
-        B_log_at_t = make_B_log_evaluator_2case(recDist_i = recDist[i], 
-                                                fp = fp,
-                                                ss = ss,
-                                                ps = ps,
-                                                LL = LL,
-                                                LU = LU,
-                                                MU = MU,
-                                                RB = RB,
-                                                scaledu = scaledu)
+        B_log_at_t, idx_contains, idx_nearby, ext_mask = make_B_log_evaluator_3case(
+            recDist_i=recDist[i], fp=fp, R_cutoff=R_cutoff,
+            ss=ss, ps=ps, LL=LL, LU=LU, MU=MU, RLL=RLL, RLU=RLU, RB=RB, rf=rf,
+            scaledu=scaledu
+        )
+        
+        # B_log_at_t = make_B_log_evaluator_2case(recDist_i = recDist[i], 
+        #                                         fp = fp,
+        #                                         ss = ss,
+        #                                         ps = ps,
+        #                                         LL = LL,
+        #                                         LU = LU,
+        #                                         MU = MU,
+        #                                         RB = RB,
+        #                                         scaledu = scaledu)
         
         prev_B = 1 
         j = 0
@@ -1977,28 +1969,6 @@ def get_Bs(u, ss, ps, r_func, focal_positions, tol, grid_pts = 100):
         #                                         scaledu = scaledu,
         #                                         lb_all = lb_all,
         #                                         ub_all = ub_all)
-
-def find_equil_time_by_doubling(B_log_at_t, t0, tol, max_doubles=60):
-    # Start from t0, double until successive difference <= tol
-    B_low = 1.0
-
-    t = t0
-    B_prev = B_low
-    for _ in range(max_doubles):
-        B = float(np.exp(B_log_at_t(t)))
-        if abs(B - B_prev) <= tol:
-            return t  
-        B_prev = B
-        t *= 2.0
-    return t  
-
-def eval_on_uniform_grid_with_padding(B_log_at_t, dt, t_equil):
-    n = int(np.ceil(t_equil / dt))
-    out = np.empty(n + 1, dtype=np.float64)
-    out[0] = 1.0
-    for j in range(1, n + 1):
-        out[j] = float(np.exp(B_log_at_t(j * dt)))
-    return out.tolist()
                                               
 def make_B_log_evaluator_2case(recDist_i, fp, ss, ps, LL, LU, MU, RB, scaledu):
     # contains mask
@@ -2031,7 +2001,7 @@ def make_B_log_evaluator_3case(recDist_i, fp, R_cutoff,
     # creating masks
     #TODO deal with contains length >1 edge-case
     contains = (LL <= fp) & (fp <= LU)
-    nearby = (~contains) & (recDist_i <= R_cutoff)
+    nearby = (~contains) & (recDist_i < R_cutoff)
     external = (~contains) & (~nearby)
 
     ext_logB = make_external_logB_evaluator(recDist_i, scaledu, ss, ps, external)
@@ -2041,6 +2011,8 @@ def make_B_log_evaluator_3case(recDist_i, fp, R_cutoff,
 
     near_logB = None
     if idx_nearby.size > 0:
+        if R_cutoff == 0:
+            raise ValueError("Should be no nearby with R_cutoff == 0.")
         LLn = LL[idx_nearby]; LUn = LU[idx_nearby]
         dL = np.abs(fp - LLn)
         dU = np.abs(fp - LUn)
@@ -2068,8 +2040,6 @@ def make_B_log_evaluator_3case(recDist_i, fp, R_cutoff,
 
     return logB, idx_contains, idx_nearby, external
 
-
-# TODO now two case
 def make_B_log_evaluator_3case_dep(
     recDist_i, fp, R_cutoff, ss, ps, LL, LU, MU, RLL, RLU, RB, rf, scaledu, lb_all, ub_all
 ):
@@ -2177,24 +2147,23 @@ def make_nearby_logB_evaluator(mu_near, lb_near, ub_near, rbp_near, r0_near, ss,
 
         # numer = -(lb*r) - a0*e2tb + 2*a0*etb + (ub*r) + b0*e2ta - 2*b0*eta
         numer[:] = -lb_r
-        numer += -a0 * e2_tb
-        numer +=  2.0 * a0 * e_tb
-        numer +=  ub_r
-        numer +=  b0 * e2_ta
-        numer += -2.0 * b0 * e_ta
+        numer[:] += -a0 * e2_tb
+        numer[:] +=  2.0 * a0 * e_tb
+        numer[:] +=  ub_r
+        numer[:] +=  b0 * e2_ta
+        numer[:] += -2.0 * b0 * e_ta
 
         np.divide(numer, denom, out=frac, where=(denom != 0.0))
 
         inside[:] = frac
-        inside +=  2.0 * t * E1_at
-        inside += -2.0 * t * E1_2at
-        inside +=  2.0 * t * (-E1_bt + E1_2bt)
+        inside[:] +=  2.0 * t * E1_at
+        inside[:] += -2.0 * t * E1_2at
+        inside[:] +=  2.0 * t * (-E1_bt + E1_2bt)
 
         # contrib = -(s * mu * inside) / rbp, with p weights
         return float(np.sum((-s) * mu_over_r * inside * p))
 
     return near_logB
-
 
 # TODO rename
 def exon_nearby_log_with_r0_batch(ss, ps,
@@ -2258,7 +2227,6 @@ def get_pred_loci(n_pos, r):
     loci = np.linspace(r[0][0], r[-1][-2], n_pos + 2)
     return loci[1:-1]
     
-
 # ----------------------------
 # t->infty limits (log-space)
 # ----------------------------
@@ -2268,16 +2236,15 @@ def logB_inf_external(recDist_i, scaledu, ss, ps, ext_mask):
     external limit:  -(s*u)/(s + r)^2  summed over exons and DFE bins.
     Here r is recDist_i for point-mass positions.
     """
-    U = np.asarray(scaledu, np.float64)[ext_mask][:, None]  # (Mext,1)
-    R = np.asarray(recDist_i, np.float64)[ext_mask][:, None]# (Mext,1)
-    s = np.asarray(ss, np.float64)[None, :]                 # (1,K)
-    p = np.asarray(ps, np.float64)[None, :]                 # (1,K)
+    U = scaledu[ext_mask][:, None]  # (Mext,1)
+    R = recDist_i[ext_mask][:, None]# (Mext,1)
+    s = ss[None, :]                 # (1,K)
+    p = ps[None, :]                 # (1,K)
 
     D = R + s                                               # (Mext,K)
     invD = np.divide(1.0, D, out=np.zeros_like(D), where=(D != 0.0))
     term = (-U) * s * (invD * invD)                          # -(u*s)/(r+s)^2
     return float(np.sum(term * p))
-
 
 def logB_inf_contains(fp, LL, LU, MU, RB, ss, ps, idx_contains):
     """
@@ -2311,7 +2278,6 @@ def logB_inf_contains(fp, LL, LU, MU, RB, ss, ps, idx_contains):
     termR = - (lR * u) * np.divide(1.0, denomR, out=np.zeros_like(s), where=(denomR != 0.0))
     return float(np.sum(p * (termL + termR)))
 
-
 def logB_inf_nearby(fp, LL, LU, MU, RB, RLL, RLU, rf, ss, ps, idx_nearby):
     """
     nearby limit:
@@ -2327,8 +2293,8 @@ def logB_inf_nearby(fp, LL, LU, MU, RB, RLL, RLU, rf, ss, ps, idx_nearby):
     if idx_nearby.size == 0:
         return 0.0
 
-    s = np.asarray(ss, np.float64)[None, :]   # (1,K)
-    p = np.asarray(ps, np.float64)[None, :]   # (1,K)
+    s = ss[None, :]   # (1,K)
+    p = ps[None, :]   # (1,K)
 
     j = idx_nearby
     LLn = LL[j]; LUn = LU[j]
@@ -2356,12 +2322,6 @@ def logB_inf_nearby(fp, LL, LU, MU, RB, RLL, RLU, rf, ss, ps, idx_nearby):
 
 
 
-
-
-
-
-
-# TODO almost all time spent in nearby
 
 
 os.chdir("/home/nathan/Documents/GitHub/BGSdemo/validation/fwdpy/DemographicSims/ooa/threepop/weakSelection")
