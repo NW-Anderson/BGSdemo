@@ -1230,7 +1230,10 @@ def cluster_scale_funs(u,
                 ps = None,
                 targetSize = 1e4,
                 tol = 1e-4,
-                minPos = None,):
+                minPos = None,
+                dt = 1e4,
+                R_cutoff = 1e-3,
+                n_clusters = 20):
     # check u is correct shape
     if type(u) is list:
         if np.ndim(u) != 2 or np.shape(u)[1] != 3:
@@ -1352,7 +1355,7 @@ def cluster_scale_funs(u,
         raise ValueError('ps must be None or a list of probabilities')
     
     # define position of point masses as center of each u region
-    positions = [(x + y)/2 for x,y,z in u]
+    # positions = [(x + y)/2 for x,y,z in u]
 
     # convert r to a cumulative interpolating function
     if type(r) is float: 
@@ -1367,6 +1370,17 @@ def cluster_scale_funs(u,
     if (type(focal_positions) is not list and type(focal_positions) is not np.ndarray) or not isinstance(focal_positions[0], (int, float)):
         raise ValueError('focal_positions must be a list of int or float')
         
+    # compute grid of B(t) for each focal position, every dt generations until |B(t) - B(t-dt)| < tol
+    B_grid = get_Bs(u, ss, ps, r, focal_positions, tol, dt, R_cutoff)
+    # pad ends of B functions that reached quil early
+    B_rect = ragged_to_rect_repeat_last(B_grid)
+    # compute distance matrix
+    D = pairwise_ssd(B_rect)
+    
+    labels, medoids = cluster_B_kmedoids(D, K=n_clusters)
+    
+    return B_rect, labels, medoids
+
     
     # directly computing features        
     startTime = datetime.now()
@@ -1379,18 +1393,20 @@ def cluster_scale_funs(u,
     
     sil_feat = silhouette_score(X, labels, metric='euclidean')
     ari_feat = ari_stability_test(lambda X: cluster_features(X, K=20), features)
+    ari_feat.mean()
     plot_kmedoids_clusters(B_rect, labels, medoids)
 
     features = np.column_stack([B_inf, np.log10(half_time)])
     labels, medoids, model, X = kmedoids_on_features(features, K=20)
     sil_feat_log = silhouette_score(X, labels, metric='euclidean')
     ari_feat_log = ari_stability_test(lambda X: cluster_features(X, K=20), features)
+    ari_feat_log.mean()
 
     ###########
     
     # from full B matrix
     startTime = datetime.now()
-    B_grid = get_Bs(u, ss, ps, r, focal_positions, tol, dt=1e4, R_cutoff=0)
+    B_grid = get_Bs(u, ss, ps, r, focal_positions, tol = 1e-3, dt=1e4, R_cutoff=0.01)
     endTime = datetime.now()
     endTime - startTime
     B_rect = ragged_to_rect_repeat_last(B_grid)
@@ -1401,6 +1417,7 @@ def cluster_scale_funs(u,
 
     sil_curve = silhouette_score(D, labels, metric='precomputed')
     ari_curve = ari_stability_precomputed(lambda Dsub: cluster_curves(Dsub, K=20), D)
+    ari_curve.mean()
     plot_kmedoids_clusters(B_rect, labels, medoids)
 
     sil_vals = []
@@ -1423,8 +1440,23 @@ def cluster_scale_funs(u,
         ari_curve = ari_stability_precomputed(lambda Dsub: cluster_curves(Dsub, K=kk), D)
         
         sil_vals.append([sil_feat, sil_feat_log, sil_curve])
-        ari_vals.append([ari_feat, ari_feat_log, ari_curve])
+        ari_vals.append([ari_feat.mean(), ari_feat_log.mean(), ari_curve.mean()])
     
+    sil_feat = [x[0] for x in sil_vals]
+    max_idx = np.nonzero(sil_feat == max(sil_feat))[0][0]
+    print("feat: optimal K is " + str(max_idx + 2) + " with silhouette score " + str(max(sil_feat)))
+    
+    ari_feat = [x[0] for x in ari_vals]
+    max_idx = np.nonzero(ari_feat == max(ari_feat))[0][0]
+    print("feat: optimal K is " + str(max_idx + 2) + " with adjusted rand index " + str(max(ari_feat)))
+    
+    sil_curve = [x[2] for x in sil_vals]
+    max_idx = np.nonzero(sil_curve == max(sil_curve))[0][0]
+    print("curve: optimal K is " + str(max_idx + 2) + " with silhouette score " + str(max(sil_curve)))
+    
+    ari_curve = [x[2] for x in ari_vals]
+    max_idx = np.nonzero(ari_curve == max(ari_curve))[0][0]
+    print("curve: optimal K is " + str(max_idx + 2) + " with adjusted rand index " + str(max(ari_curve)))
     # B_inf, half_time, half_index = compute_Binf_and_halftime(B_grid, dt = 1e3)
     
     # features = np.column_stack([B_inf, half_time])
@@ -2033,6 +2065,7 @@ def make_B_log_evaluator_3case(recDist_i, fp, R_cutoff,
             j = int(idx_contains[0])
             total += exon_contains_focal_log(ss, ps, MU[j], LL[j], LU[j], fp, RB[j], t)
 
+        # Case C: nearby
         if near_logB is not None:
             total += near_logB(t)
 
@@ -2347,12 +2380,19 @@ nbins = 10
 dfe = discretize_deleterious_gamma_dfe_mean_shape(mean, shape, nbins)
 ss = [y for x,y in dfe]
 
-
-cluster_scale_funs(u = exonMutMap,
+startTime = datetime.now()
+B_rect, labels, medoids = cluster_scale_funs(u = exonMutMap,
                     r = recMap,
                     focal_positions = focal_positions,
-                    ss = ss)
+                    ss = ss,
+                    tol = 1e-3,
+                    dt = 1e4,
+                    R_cutoff = 1e-3,
+                    n_clusters = 20)
+endTime = datetime.now()
+endTime - startTime
 
+plot_kmedoids_clusters(B_rect, labels, medoids)
 
 
 
