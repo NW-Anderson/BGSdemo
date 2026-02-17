@@ -1221,6 +1221,9 @@ def bgs_wrapper(u,
 # targetSize = 1e4
 # tol = 1e-4
 # minPos = None
+# dt = 1e3
+# R_cutoff = 1e-3
+# n_clusters = 20
 
 def cluster_scale_funs(u,
                 r,
@@ -1384,7 +1387,7 @@ def cluster_scale_funs(u,
     
     # directly computing features        
     startTime = datetime.now()
-    B_inf, half_time, half_index = get_Binf_and_halftime(u, ss, ps, r, focal_positions, dt=1e4, R_cutoff=0, max_steps=200000)
+    B_inf, half_time, half_index = get_Binf_and_halftime(u, ss, ps, r, focal_positions, dt, R_cutoff)
     endTime = datetime.now()
     endTime - startTime
             
@@ -1404,15 +1407,50 @@ def cluster_scale_funs(u,
 
     ###########
     
+    startTime = datetime.now()
+    B_grid_old = get_Bs(u, ss, ps, r, focal_positions, tol, dt, R_cutoff)
+    endTime = datetime.now()
+    endTime - startTime
+
+    
     # from full B matrix
     startTime = datetime.now()
-    B_grid = get_Bs(u, ss, ps, r, focal_positions, tol = 1e-3, dt=1e4, R_cutoff=0.01)
+    B_grid, t_vals = get_Bs_2(u, ss, ps, r, focal_positions, 5e-2, dt, R_cutoff)
     endTime = datetime.now()
     endTime - startTime
     B_rect = ragged_to_rect_repeat_last(B_grid)
     D = pairwise_ssd(B_rect)
     
+    mxt = max([len(x) for x in t_vals])
+    t_vals = [x for x in t_vals if len(x) == mxt][0]
     
+    labels, medoids = cluster_B_kmedoids(D, K=n_clusters)
+
+    plot_kmedoids_clusters(B_grid, labels, medoids, t_vals=t_vals)
+
+    B_inf = get_Binf(u, ss, ps, r, focal_positions, dt, R_cutoff)
+    B_equil = [x[-1] for x in B_grid]
+    diff = B_equil - B_inf
+    np.mean(diff)
+    np.median(diff)
+    max(diff)
+    min(diff)
+    size = [(y - x)  for x,y,z in u]
+    
+    big_diffs = recDist[np.nonzero([x == max(diff) for x in diff])]
+    nearby = [[y,z] for x in big_diffs for y,z in zip(x,size) if y < R_cutoff]
+    
+    plt.figure(figsize=(6,4))
+    plt.plot(B_rect[166], color='red', lw=3)
+    plt.title(f"Cluster {c} (n={len(idx)})")
+    plt.xlabel("time index")
+    plt.ylabel("B(t)")
+    plt.tight_layout()
+    plt.show()
+    
+    
+    
+    max([x[1] for x in nearby])
     labels, medoids = cluster_B_kmedoids(D, K=20)
 
     sil_curve = silhouette_score(D, labels, metric='precomputed')
@@ -1632,7 +1670,7 @@ def choose_k_kmedoids_silhouette(D, k_min=2, k_max=20, random_state=0):
     best_score, best_K, best_labels, best_medoids = best
     return best_K, best_labels, best_medoids, scores
 
-def plot_kmedoids_clusters(B, labels, medoids, max_curves=50):
+def plot_kmedoids_clusters(B, labels, medoids, max_curves=50, t_vals = None, rect = False):
     """
     B        : (F,T) matrix of B(t) curves
     labels   : cluster labels for each curve
@@ -1640,19 +1678,30 @@ def plot_kmedoids_clusters(B, labels, medoids, max_curves=50):
     """
 
     K = len(medoids)
+    if t_vals is None:
+        t_vals = range(len(B[0]))
 
     for c in range(K):
         idx = np.where(labels == c)[0]
+        m = medoids[c]
 
+        if not rect:
+            B_c = np.array(B, dtype=object)[idx[:max_curves]].tolist()
+            B_c.append(B[m])
+            B_c = ragged_to_rect_repeat_last(B_c)
+            t_vals_c = t_vals[:len(B_c[0])]
+        else:
+            B_c = B[idx[:max_curves]]
+            B_c.append(B[m])
+        
         plt.figure(figsize=(6,4))
 
         # plot some member curves (light)
-        for i in idx[:max_curves]:
-            plt.plot(B[i], color='gray', alpha=0.25)
+        for i in range(len(B_c)):
+            plt.plot(t_vals_c, B_c[i], color='gray', alpha=0.25)
 
         # plot medoid (bold)
-        m = medoids[c]
-        plt.plot(B[m], color='red', lw=3)
+        plt.plot(t_vals_c, B_c[-1], color='red', lw=3)
 
         plt.title(f"Cluster {c} (n={len(idx)})")
         plt.xlabel("time index")
@@ -1837,6 +1886,53 @@ def exon_contains_focal_log(ss, ps, u, ll, lu, focalPos, rbp, t):
 # Main: compute only B_inf and half_time
 # -----------------------------------------
 
+def get_Binf(exons, ss, ps, r_func, focal_positions,
+                          dt=1e3, R_cutoff=0.01):
+    ex = np.asarray(exons, dtype=np.float64) # (E,3)
+    LL = ex[:, 0] # (E,) start positions
+    LU = ex[:, 1] # (E,) start positions
+    MU = ex[:, 2] # (E,) start positions
+    
+    positions = 0.5 * (LL + LU) # (E,) point mass positions
+    scaledu = (LU - LL) * MU # (E,) point mass weights
+    
+    # Precompute endpoint r-values and within-exon rbp
+    RLL = r_func(LL)
+    RLU = r_func(LU)
+    RB = (RLU - RLL) / (LU - LL)
+    
+    # Precompute r at point-mass positions (for recDist per focal)
+    recDist = getRecDist_3(positions, r_func, focal_positions) # (F,E) recDist[i, j] is distance between focal_positions[i] and positions[j]
+    
+    ss = np.asarray(ss, np.float64)
+    ps = np.asarray(ps, np.float64)
+    
+    F = len(focal_positions)
+    B_inf = np.empty(F, dtype=np.float64)
+    
+    for i, fp in enumerate(focal_positions):
+        fp = float(fp)
+        rf = float(r_func(fp))
+        recDist_i = recDist[i]
+    
+        # Build 3-case evaluator 
+        B_log_at_t, idx_contains, idx_nearby, ext_mask = make_B_log_evaluator_3case(
+            recDist_i=recDist_i, fp=fp, R_cutoff=R_cutoff,
+            ss=ss, ps=ps, LL=LL, LU=LU, MU=MU, RLL=RLL, RLU=RLU, RB=RB, rf=rf,
+            scaledu=scaledu
+        )
+    
+        # ---- B_inf using t->inf limits (3 cases) ----
+        log_inf = 0.0
+        log_inf += logB_inf_external(recDist_i, scaledu, ss, ps, ext_mask)
+        log_inf += logB_inf_contains(fp, LL, LU, MU, RB, ss, ps, idx_contains)
+        log_inf += logB_inf_nearby(fp, LL, LU, MU, RB, RLL, RLU, rf, ss, ps, idx_nearby)
+    
+        B_inf_i = float(np.exp(log_inf))
+        B_inf[i] = B_inf_i
+        
+    return B_inf
+
 def get_Binf_and_halftime(exons, ss, ps, r_func, focal_positions,
                           dt=1e3, R_cutoff=0.01, max_steps=200000):
     """
@@ -1911,6 +2007,121 @@ def get_Binf_and_halftime(exons, ss, ps, r_func, focal_positions,
 
     return B_inf, half_time, half_index
 
+def get_Bs_2(u, ss, ps, r_func, focal_positions, tol, dt = 1e3, R_cutoff = 0.01):
+    # first define some variables that are reused often
+    ex = np.asarray(u, dtype=np.float64)   # (E,3)
+    LL = ex[:,0]                               # (E,) start positions
+    LU = ex[:,1]                               # (E,) end positions
+    MU = ex[:,2]                               # (E,) local mu per bp
+    
+    positions = 0.5*(LL + LU)                  # (E,) point mass positions
+    scaledu   = (LU - LL)*MU                   # (E,) point-mass weight
+    
+    # recombination map at exon endpoints (compute once)
+    RLL = r_func(LL)                  # (E,) 
+    RLU = r_func(LU)                  # (E,) 
+    RB  = (RLU - RLL) / (LU - LL)              # (E,) recomb per bp within exon
+    
+    ss = np.asarray(ss, np.float64) 
+    ps = np.asarray(ps, np.float64)
+    
+    # startTime = datetime.now()
+    recDist = getRecDist_3(positions, r_func, focal_positions) # (F,E) recDist[i, j] is distance between focal_positions[i] and positions[j]
+    # endTime = datetime.now()
+    # endTime - startTime
+    
+    # startTime = datetime.now()
+    
+    B_inf = get_Binf(u, ss, ps, r_func, focal_positions, dt, R_cutoff)
+    
+    all_bs = []
+    all_ts = []
+    
+    for i,fp in enumerate(focal_positions):
+        rf = r_func(fp)
+        # dL = np.abs(fp - LL)   # (E,) distance to left endpoint for all exons
+        # dU = np.abs(fp - LU)   # (E,) distance to right endpoint
+        
+        # lb_all = np.minimum(dL, dU)   # (E,) nearer boundary distance (bp)
+        # ub_all = np.maximum(dL, dU)   # (E,) farther boundary distance (bp)
+        
+        B_log_at_t, idx_contains, idx_nearby, ext_mask = make_B_log_evaluator_3case(
+            recDist_i=recDist[i], fp=fp, R_cutoff=R_cutoff,
+            ss=ss, ps=ps, LL=LL, LU=LU, MU=MU, RLL=RLL, RLU=RLU, RB=RB, rf=rf,
+            scaledu=scaledu
+        )
+        
+        # B_log_at_t = make_B_log_evaluator_2case(recDist_i = recDist[i], 
+        #                                         fp = fp,
+        #                                         ss = ss,
+        #                                         ps = ps,
+        #                                         LL = LL,
+        #                                         LU = LU,
+        #                                         MU = MU,
+        #                                         RB = RB,
+        #                                         scaledu = scaledu)
+        
+        t_vals, B_vals = eval_multires_until_equil_stride_tol(
+            B_log_at_t,
+            B_inf[i],
+            dt,
+            tol)
+        
+        all_bs.append(B_vals)
+        all_ts.append(t_vals)
+    # endTime = datetime.now()
+    # endTime - startTime
+    return all_bs, all_ts
+ 
+def eval_multires_until_equil_stride_tol(
+    B_log_at_t,
+    b_inf,
+    dt,
+    tol,
+    phases=((1, 100), (100, 10100), (1e4, 1010100)),
+    max_evals=1_000_000,
+):
+    """
+    Returns:
+        t_vals : array of sampled times
+        B_vals : array of B(t) values
+
+    t_vals are in the same units as dt (since t = j*dt)
+
+    Stop when approximate per-dt change is below tol.
+    """
+
+    t_vals = [0.0]
+    B_vals = [1.0]
+
+    j = 0
+    evals = 0
+
+    for stride, j_max in phases:
+        stride = int(stride)
+        j_max = int(j_max)
+
+        while j < j_max:
+            j += stride
+            t = j * float(dt)
+
+            B = float(np.exp(B_log_at_t(t)))
+
+            t_vals.append(t)
+            B_vals.append(B)
+            evals += 1
+
+            if evals >= max_evals:
+                return np.asarray(t_vals), np.asarray(B_vals)
+
+            # stride-aware stopping condition
+            if abs(B - b_inf) <= tol:
+                return np.asarray(t_vals), np.asarray(B_vals)
+
+
+    raise ValueError('didnt reach equil in phases provided')
+    return np.asarray(t_vals), np.asarray(B_vals)
+ 
 def get_Bs(u, ss, ps, r_func, focal_positions, tol, dt = 1e3, R_cutoff = 0.01):
     # first define some variables that are reused often
     ex = np.asarray(u, dtype=np.float64)   # (E,3)
