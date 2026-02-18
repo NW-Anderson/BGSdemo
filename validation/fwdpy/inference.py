@@ -295,39 +295,6 @@ def combine_and_split_regions(exonMutMap, targetSize = 1e4):
 def rescaledPointMassContribution(scaledu, s, t, r, ancestralNe, ancTime):
     return - scaledu / s * (s / (r + s) * (1 - math.exp(- r * (ancTime - t * 2 * ancestralNe) - s * (ancTime - t * 2 * ancestralNe))))**2
 
-def get_scaling_fun(positions, u, ss, ps, r, focalPos, censusSize, totalT, tol, grid_pts = 100):
-    scaledu = [z * (y - x) for x,y,z in u]
-    recDist = [getRecDist(pos, r, focalPos) for pos in positions]
-    
-    diff = 100
-    start = 1
-    i = 0
-    while abs(diff) > tol:
-        end = B(scaledu, ss, ps, (i + 1) * censusSize / 10, recDist)
-        diff = end - start
-        start = end
-        i += 1
-        
-    ancTime = censusSize / 10 * i
-    ancTime = max(ancTime, totalT * 2 * censusSize)
-    ancB = B(scaledu, ss, ps, ancTime, recDist)
-    ancNe = ancB * censusSize
-    
-    tmp_fun = lambda t: math.exp(sum([p * rescaledPointMassContribution(u, s, t, r, ancNe, ancTime) for u,r in zip(scaledu, recDist) for p,s in zip(ps, ss)])) / ancB
-    
-    ts = np.linspace(0, ancTime / 2 / ancNe, grid_pts)
-    bs = [tmp_fun(t) for t in ts]
-    
-    tmp_fun = interpolate.interp1d(ts, bs)
-    def q_fun(t):
-        tt = t
-        if tt < 0:
-            tt = 0
-        elif tt > ancTime / 2 / ancNe:
-            tt = ancTime / 2 / ancNe
-        return [tmp_fun(tt).tolist()]
-    return(q_fun, ancTime, ancNe)
-
 def getOldestEpoch(graph):
     tme = 0
     for deme in graph.demes:
@@ -951,6 +918,25 @@ def discretize_deleterious_gamma_dfe_mean_shape(
 
     return dfe
  
+u = exonMutMap
+r = recMap
+focalPos = focalPos
+sample_size = [sample_size]
+ss = ss
+sampled_demes=sampled_demes
+g = demo
+
+cs = None
+totalT = None
+L = None
+ps = None
+targetSize = 1e4
+tol = 1e-4
+minPos = None
+focal_s = None
+eval_thres = "step"
+R_cutoff = 1e-3
+
 def bgs_wrapper(u,
                 r,
                 focalPos,
@@ -966,6 +952,8 @@ def bgs_wrapper(u,
                 tol = 1e-4,
                 minPos = None,
                 focal_s = None,
+                eval_thres = "step",
+                R_cutoff = 1e-3,
                 ):
     # check u is correct shape
     if type(u) is list:
@@ -1138,7 +1126,7 @@ def bgs_wrapper(u,
 
         # define scaling function
         # f, ancTime, ancNe = get_scaling_fun(positions, u, ss, ps, r, focalPos, censusSize, totalT, tol)
-        f, ancTime, ancNe = get_scaling_fun(positions, u, ss, ps, r, focalPos, censusSize, totalT, tol)
+        f, ancTime, ancNe = get_scaling_fun_2(u, ss, ps, r, focalPos, censusSize, totalT, tol, eval_thres = eval_thres, R_cutoff = R_cutoff)
         # rescale census size function to be in units of 2 * Ne_bgs generations 
         rescaledcs = rescale_cs(cs, totalT, ancTime, ancNe, censusSize) 
         
@@ -1182,8 +1170,7 @@ def bgs_wrapper(u,
             
         # define scaling function
         # f, ancTime, ancNe = get_scaling_fun(positions, u, ss, ps, r, focalPos, censusSize, totalT, tol)    
-        f, ancTime, ancNe = get_scaling_fun(positions, u, ss, ps, r, focalPos, censusSize, totalT, tol)
-        
+        f, ancTime, ancNe = get_scaling_fun_2(u, ss, ps, r, focalPos, censusSize, totalT, tol, eval_thres = eval_thres, R_cutoff = R_cutoff)
         # define gamma 
         if isinstance(focal_s, (int, float)):
             gamma = 2 * ancNe * focal_s
@@ -1221,9 +1208,10 @@ def bgs_wrapper(u,
 # targetSize = 1e4
 # tol = 1e-4
 # minPos = None
-# dt = 1e3
+# dt = 1e4
 # R_cutoff = 1e-3
 # n_clusters = 20
+# equil_thres = "step"
 
 def cluster_scale_funs(u,
                 r,
@@ -1236,7 +1224,8 @@ def cluster_scale_funs(u,
                 minPos = None,
                 dt = 1e4,
                 R_cutoff = 1e-3,
-                n_clusters = 20):
+                n_clusters = 20,
+                equil_thres = "step"):
     # check u is correct shape
     if type(u) is list:
         if np.ndim(u) != 2 or np.shape(u)[1] != 3:
@@ -1372,9 +1361,17 @@ def cluster_scale_funs(u,
         raise ValueError('tol must be float or int') 
     if (type(focal_positions) is not list and type(focal_positions) is not np.ndarray) or not isinstance(focal_positions[0], (int, float)):
         raise ValueError('focal_positions must be a list of int or float')
-        
-    # compute grid of B(t) for each focal position, every dt generations until |B(t) - B(t-dt)| < tol
-    B_grid = get_Bs(u, ss, ps, r, focal_positions, tol, dt, R_cutoff)
+
+    if equil_thres == "step":
+        # compute grid of B(t) for each focal position, every dt generations until |B(t) - B(t-dt)| < tol
+        B_grid = get_Bs(u, ss, ps, r, focal_positions, tol, dt, R_cutoff)
+        mxt = max([len(x) for x in B_grid])
+        t_vals = [dt * j for j in range(mxt)]
+    elif equil_thres == "inf":
+        B_grid, t_vals = get_Bs_2(u, ss, ps, r, focal_positions, tol, dt, R_cutoff)
+        mxt = max([len(x) for x in t_vals])
+        t_vals = [x for x in t_vals if len(x) == mxt][0]
+
     # pad ends of B functions that reached quil early
     B_rect = ragged_to_rect_repeat_last(B_grid)
     # compute distance matrix
@@ -1382,7 +1379,7 @@ def cluster_scale_funs(u,
     
     labels, medoids = cluster_B_kmedoids(D, K=n_clusters)
     
-    return B_rect, labels, medoids
+    return B_rect, labels, medoids, t_vals
 
     
     # directly computing features        
@@ -1413,7 +1410,7 @@ def cluster_scale_funs(u,
     endTime - startTime
 
     
-    # from full B matrix
+    # from  full B matrix
     startTime = datetime.now()
     B_grid, t_vals = get_Bs_2(u, ss, ps, r, focal_positions, 5e-2, dt, R_cutoff)
     endTime = datetime.now()
@@ -1437,12 +1434,21 @@ def cluster_scale_funs(u,
     min(diff)
     size = [(y - x)  for x,y,z in u]
     
+    ex = np.asarray(u, dtype=np.float64)   # (E,3)
+    LL = ex[:,0]                               # (E,) start positions
+    LU = ex[:,1]                               # (E,) end positions
+    MU = ex[:,2]                               # (E,) local mu per bp
+    
+    positions = 0.5*(LL + LU)  
+    
+    recDist = getRecDist_3(positions, r, focal_positions)
+    
+    focal_idx=np.nonzero([x == max(diff) for x in diff])
     big_diffs = recDist[np.nonzero([x == max(diff) for x in diff])]
     nearby = [[y,z] for x in big_diffs for y,z in zip(x,size) if y < R_cutoff]
     
     plt.figure(figsize=(6,4))
-    plt.plot(B_rect[166], color='red', lw=3)
-    plt.title(f"Cluster {c} (n={len(idx)})")
+    plt.plot(B_rect[focal_idx[0][0]], color='red', lw=3)
     plt.xlabel("time index")
     plt.ylabel("B(t)")
     plt.tight_layout()
@@ -1876,15 +1882,106 @@ def exon_contains_focal_log(ss, ps, u, ll, lu, focalPos, rbp, t):
     contrib = internal_containing_vec(ss, u, lL, t, rbp) + internal_containing_vec(ss, u, lR, t, rbp)
     return float(np.sum(ps * contrib))
 
-# r_func = r
-# exons = u
-# dt = 1e3
-# R_cutoff = 0.01
-# max_steps = int(2e5)
 
-# -----------------------------------------
-# Main: compute only B_inf and half_time
-# -----------------------------------------
+
+def get_scaling_fun_2(u, ss, ps, r, focalPos, censusSize, totalT, tol, grid_pts = 100, eval_thres = "step", R_cutoff = 1e-3):
+    ex = np.asarray(u, dtype=np.float64)   # (E,3)
+    LL = ex[:,0]                               # (E,) start positions
+    LU = ex[:,1]                               # (E,) end positions
+    MU = ex[:,2]                               # (E,) local mu per bp
+    
+    positions = 0.5*(LL + LU)                  # (E,) point mass positions
+    scaledu   = (LU - LL)*MU                   # (E,) point-mass weight
+    
+    # recombination map at exon endpoints (compute once)
+    RLL = r(LL)                  # (E,) 
+    RLU = r(LU)                  # (E,) 
+    RB  = (RLU - RLL) / (LU - LL)              # (E,) recomb per bp within exon
+    
+    ss = np.asarray(ss, np.float64) 
+    ps = np.asarray(ps, np.float64)
+    
+    # startTime = datetime.now()
+    recDist = getRecDist_3(positions, r, [focalPos]) # (F,E) recDist[i, j] is distance between focal_positions[i] and positions[j]
+    # endTime = datetime.now()
+    # endTime - startTime
+    
+    # startTime = datetime.now()
+    
+    rf = r(focalPos)
+    B_log_at_t, idx_contains, idx_nearby, ext_mask = make_B_log_evaluator_3case(
+        recDist_i=recDist[0], fp=focalPos, R_cutoff=R_cutoff,
+        ss=ss, ps=ps, LL=LL, LU=LU, MU=MU, RLL=RLL, RLU=RLU, RB=RB, rf=rf,
+        scaledu=scaledu
+    )
+    
+    dt = censusSize / 10
+    if eval_thres == "step":
+        prev_B = 1 
+        j = 0
+        bvals = [1.0]
+        t_vals = [0.0]
+        
+        equil = False
+        while not equil:
+            j += 1
+            t = j * dt
+            B = float(np.exp(B_log_at_t(t)))
+            bvals.append(B) 
+            t_vals.append(t)
+
+            
+            if abs(B - prev_B) <= tol: 
+                equil = True
+            prev_B = B
+    elif eval_thres == "inf":
+        B_inf = get_Binf(u, ss, ps, r, [focalPos], R_cutoff = R_cutoff)
+        
+        t_vals, bvals = eval_multires_until_equil_stride_tol(
+            B_log_at_t,
+            B_inf[0],
+            dt,
+            tol = 1e-2)
+    
+    ancTime = max(t_vals[-1], totalT * 2 * censusSize)
+    if t_vals[-1] != ancTime or len(bvals) < grid_pts:
+        t_vals = np.linspace(0, ancTime, max(grid_pts, len(bvals)))
+        bvals = np.exp([B_log_at_t(t) for t in t_vals])
+        
+    ancB = bvals[-1]
+    ancNe = ancB * censusSize
+    
+    rescaled_ts = [(ancTime - x) / 2 / ancNe for x in reversed(t_vals)]
+    rescaled_bs = [x / ancB for x in reversed(bvals)]       
+        
+    tmp_fun = interpolate.interp1d(rescaled_ts, rescaled_bs)
+    def q_fun(t):
+        tt = t
+        if tt < 0:
+            tt = 0
+        elif tt > ancTime / 2 / ancNe:
+            tt = ancTime / 2 / ancNe
+        return [tmp_fun(tt).tolist()]
+    
+    return(q_fun, ancTime, ancNe)
+
+plt.figure(figsize=(6,4))
+plt.plot(t_vals_inf, bvals_inf, color='blue', lw=3, label = "inf")
+plt.plot(t_vals_step, bvals_step, color='red', lw=3, label = "step")
+plt.xlabel("time (generations)")
+plt.ylabel("B(t)")
+plt.tight_layout()
+plt.legend()
+plt.show()
+
+plt.figure(figsize=(6,4))
+# plt.plot(t_vals_inf, B_rect_inf[focal_idx], color='blue', lw=3, label = "inf")
+plt.plot(np.linspace(0, ancTime / 2 / ancNe, 100), [q_fun(x) for x in np.linspace(0, ancTime / 2 / ancNe, 100)], color='red', lw=3, label = "step")
+plt.xlabel("time (generations)")
+plt.ylabel("B(t)")
+plt.tight_layout()
+plt.legend()
+plt.show()
 
 def get_Binf(exons, ss, ps, r_func, focal_positions,
                           dt=1e3, R_cutoff=0.01):
@@ -2592,16 +2689,162 @@ dfe = discretize_deleterious_gamma_dfe_mean_shape(mean, shape, nbins)
 ss = [y for x,y in dfe]
 
 startTime = datetime.now()
-B_rect, labels, medoids = cluster_scale_funs(u = exonMutMap,
+B_rect, labels, medoids, t_vals = cluster_scale_funs(u = exonMutMap,
                     r = recMap,
                     focal_positions = focal_positions,
                     ss = ss,
-                    tol = 1e-3,
-                    dt = 1e4,
+                    tol = 1e-5,
+                    dt = 730,
                     R_cutoff = 1e-3,
-                    n_clusters = 20)
+                    n_clusters = 20,
+                    equil_thres = "step")
 endTime = datetime.now()
 endTime - startTime
+
+B_rect_step = B_rect
+t_vals_step = np.array(t_vals, dtype = 'float64')
+
+startTime = datetime.now()
+B_rect, labels, medoids, t_vals = cluster_scale_funs(u = exonMutMap,
+                    r = recMap,
+                    focal_positions = focal_positions,
+                    ss = ss,
+                    tol = 1e-2,
+                    dt = 730,
+                    R_cutoff = 1e-3,
+                    n_clusters = 20,
+                    equil_thres = "inf")
+endTime = datetime.now()
+endTime - startTime
+
+B_rect_inf = B_rect
+t_vals_inf = t_vals
+
+focal_idx = 516
+focalPos = focal_positions[focal_idx]
+
+plt.figure(figsize=(6,4))
+plt.plot(t_vals_inf, B_rect_inf[focal_idx], color='blue', lw=3, label = "inf")
+plt.plot(t_vals_step, B_rect_step[focal_idx], color='red', lw=3, label = "step")
+plt.xlabel("time (generations)")
+plt.ylabel("B(t)")
+plt.tight_layout()
+plt.legend()
+plt.show()
+
+plt.figure(figsize=(6,4))
+plt.plot(t_vals_inf[np.nonzero(t_vals_inf <= max(t_vals_step))], B_rect_inf[focal_idx][np.nonzero(t_vals_inf <= max(t_vals_step))], color='blue', lw=3, label = "inf")
+plt.plot(t_vals_step, B_rect_step[focal_idx], color='red', lw=3, label = "step")
+plt.xlabel("time (generations)")
+plt.ylabel("B(t)")
+plt.tight_layout()
+plt.legend()
+plt.show()
+
+t_max = None
+B_prev = B_rect_step[focal_idx][0]
+for i in range(1, len(t_vals_step)):
+    if B_prev == B_rect_step[focal_idx][i]:
+        t_max = t_vals_step[i]
+        break
+    else:
+        B_prev = B_rect_step[focal_idx][i]
+
+plt.figure(figsize=(6,4))
+plt.plot(t_vals_inf[np.nonzero(t_vals_inf <= t_max)], B_rect_inf[focal_idx][np.nonzero(t_vals_inf <= t_max)], color='blue', lw=3, label = "inf")
+plt.plot(t_vals_step[np.nonzero(t_vals_step <= t_max)], B_rect_step[focal_idx][np.nonzero(t_vals_step <= t_max)], color='red', lw=3, label = "step")
+plt.xlabel("time (generations)")
+plt.ylabel("B(t)")
+plt.tight_layout()
+plt.legend()
+plt.show()
+
+sample_size = [40]
+sampled_demes = ['CEU']
+demo = demes.load('ooa.yaml')
+
+def get_ceu_data(params, focalIndex, n_load, key="ceu", dtype=np.float64):
+    seeds = [y for x, y in params][0:n_load]
+    n = len(seeds)
+    if n == 0:
+        raise ValueError("No seeds")
+
+    # init accumulator
+    with np.load(f"{seeds[0]}.npz") as z:
+        acc = np.array(z[key][focalIndex], dtype=dtype, copy=True)
+
+    # in-place add
+    for seed in seeds[1:]:
+        with np.load(f"{seed}.npz") as z:
+            acc += z[key][focalIndex]
+
+    acc /= n
+    return acc
+
+def read_params():
+    intervals = []
+    with open('ooaGamma.txt') as f:
+        for line in f:
+            if line.startswith("#") or line.strip() == "":
+                continue
+            fields = line.strip().split()
+            demo   = str(fields[0])
+            seed  = int(fields[1])
+            intervals.append([demo, seed])
+    return intervals
+
+params = read_params()
+focalIndex = [i for i,x in enumerate(exonMap) if x[0] < focalPos and x[1] > focalPos][0]
+os.chdir('/media/nathan/T7/BGSdemo/ooaGammaExonWindows')
+data = get_ceu_data(params, focalIndex,500, dtype=np.float32)
+np.savez_compressed('site_' + str(focalPos), data=data)
+
+
+fs, ancNe = bgs_wrapper(u = exonMutMap,
+                        r = recMap,
+                        focalPos = focalPos,
+                        sample_size = sample_size,
+                        ss = ss,
+                        sampled_demes=sampled_demes,
+                        g = demo,
+                        tol = 1e-5,
+                        eval_thres = "step")
+
+fs_inf, ancNe_inf = bgs_wrapper(u = exonMutMap,
+                        r = recMap,
+                        focalPos = focalPos,
+                        sample_size = sample_size,
+                        ss = ss,
+                        sampled_demes=sampled_demes,
+                        g = demo,
+                        tol = 1e-2,
+                        eval_thres = "inf")
+
+fs_neu = moments.Spectrum.from_demes(
+    demo, 
+    sampled_demes=sampled_demes, 
+    sample_sizes=sample_size
+)
+
+oldestEpoch, ancCensusSize = getOldestEpoch(demo)
+fs = fs * 4  * 1e-8 * ancNe
+fs_inf = fs_inf * 4 * 1e-8 * ancNe_inf
+fs_neu = fs_neu * 4  * 1e-8 * ancCensusSize    
+
+
+fig, ax = plt.subplots(1, 1, figsize=(16, 8), sharex=True, sharey=False)
+fig.text(0.5, 0.04, 'Allele Frequency', ha='center')
+fig.text(0.04, 0.5, 'Count', va='center', rotation='vertical')
+fig.subplots_adjust(hspace = .25)
+fig.suptitle(str(focalPos))
+ax.plot(fs, "-", ms=8, lw=1, label="BGS step")
+# ax.plot(fs_inf, "-", ms = 8, lw = 1, label = "BGS inf")
+ax.plot(fs_neu, "-", ms=8, lw=1, label="SNM")
+ax.set_title("nbins = " + str(nbins)) 
+ax.set_yscale('log')
+ax.annotate("B=" + str(round(fs.pi()/fs_neu.pi(),3)),xy=(sample_size[0] / 10, max(fs[1:-1]) * 0.8),size="x-large")
+ax.annotate("B=" + str(round(fs_inf.pi()/fs_neu.pi(),3)),xy=(sample_size[0] / 10, max(fs[1:-1]) * 0.9),size="x-large")
+ax.legend();
 
 plot_kmedoids_clusters(B_rect, labels, medoids)
 
