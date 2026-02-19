@@ -918,24 +918,24 @@ def discretize_deleterious_gamma_dfe_mean_shape(
 
     return dfe
  
-u = exonMutMap
-r = recMap
-focalPos = focalPos
-sample_size = [sample_size]
-ss = ss
-sampled_demes=sampled_demes
-g = demo
+# u = exonMutMap
+# r = recMap
+# focalPos = focalPos
+# sample_size = [sample_size]
+# ss = ss
+# sampled_demes=sampled_demes
+# g = demo
 
-cs = None
-totalT = None
-L = None
-ps = None
-targetSize = 1e4
-tol = 1e-4
-minPos = None
-focal_s = None
-eval_thres = "step"
-R_cutoff = 1e-3
+# cs = None
+# totalT = None
+# L = None
+# ps = None
+# targetSize = 1e4
+# tol = 1e-4
+# minPos = None
+# focal_s = None
+# eval_thres = "step"
+# R_cutoff = 1e-3
 
 def bgs_wrapper(u,
                 r,
@@ -1965,23 +1965,23 @@ def get_scaling_fun_2(u, ss, ps, r, focalPos, censusSize, totalT, tol, grid_pts 
     
     return(q_fun, ancTime, ancNe)
 
-plt.figure(figsize=(6,4))
-plt.plot(t_vals_inf, bvals_inf, color='blue', lw=3, label = "inf")
-plt.plot(t_vals_step, bvals_step, color='red', lw=3, label = "step")
-plt.xlabel("time (generations)")
-plt.ylabel("B(t)")
-plt.tight_layout()
-plt.legend()
-plt.show()
+# plt.figure(figsize=(6,4))
+# plt.plot(t_vals_inf, bvals_inf, color='blue', lw=3, label = "inf")
+# plt.plot(t_vals_step, bvals_step, color='red', lw=3, label = "step")
+# plt.xlabel("time (generations)")
+# plt.ylabel("B(t)")
+# plt.tight_layout()
+# plt.legend()
+# plt.show()
 
-plt.figure(figsize=(6,4))
-# plt.plot(t_vals_inf, B_rect_inf[focal_idx], color='blue', lw=3, label = "inf")
-plt.plot(np.linspace(0, ancTime / 2 / ancNe, 100), [q_fun(x) for x in np.linspace(0, ancTime / 2 / ancNe, 100)], color='red', lw=3, label = "step")
-plt.xlabel("time (generations)")
-plt.ylabel("B(t)")
-plt.tight_layout()
-plt.legend()
-plt.show()
+# plt.figure(figsize=(6,4))
+# # plt.plot(t_vals_inf, B_rect_inf[focal_idx], color='blue', lw=3, label = "inf")
+# plt.plot(np.linspace(0, ancTime / 2 / ancNe, 100), [q_fun(x) for x in np.linspace(0, ancTime / 2 / ancNe, 100)], color='red', lw=3, label = "step")
+# plt.xlabel("time (generations)")
+# plt.ylabel("B(t)")
+# plt.tight_layout()
+# plt.legend()
+# plt.show()
 
 def get_Binf(exons, ss, ps, r_func, focal_positions,
                           dt=1e3, R_cutoff=0.01):
@@ -2717,6 +2717,8 @@ B_rect, labels, medoids, t_vals = cluster_scale_funs(u = exonMutMap,
 endTime = datetime.now()
 endTime - startTime
 
+        
+
 B_rect_inf = B_rect
 t_vals_inf = t_vals
 
@@ -2820,6 +2822,21 @@ fs_inf, ancNe_inf = bgs_wrapper(u = exonMutMap,
                         tol = 1e-2,
                         eval_thres = "inf")
 
+startTime = datetime.now()
+fs, ancNe = bgs_wrapper(u = exonMutMap,
+                        r = recMap,
+                        focalPos = focalPos,
+                        sample_size = sample_size,
+                        ss = ss,
+                        cs = [1e4],
+                        tol = 1e-5,
+                        eval_thres = "step",
+                        totalT = 0)
+endTime = datetime.now()
+endTime - startTime
+
+
+        
 fs_neu = moments.Spectrum.from_demes(
     demo, 
     sampled_demes=sampled_demes, 
