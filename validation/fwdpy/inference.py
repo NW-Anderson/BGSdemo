@@ -1882,8 +1882,6 @@ def exon_contains_focal_log(ss, ps, u, ll, lu, focalPos, rbp, t):
     contrib = internal_containing_vec(ss, u, lL, t, rbp) + internal_containing_vec(ss, u, lR, t, rbp)
     return float(np.sum(ps * contrib))
 
-
-
 def get_scaling_fun_2(u, ss, ps, r, focalPos, censusSize, totalT, tol, grid_pts = 100, eval_thres = "step", R_cutoff = 1e-3):
     ex = np.asarray(u, dtype=np.float64)   # (E,3)
     LL = ex[:,0]                               # (E,) start positions
