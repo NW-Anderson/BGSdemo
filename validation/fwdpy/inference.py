@@ -1745,7 +1745,7 @@ def pairwise_ssd(B):
 
     # numerical cleanup: tiny negative values to 0
     np.maximum(D, 0.0, out=D)
-    np.fill_diagonal(D, 0) # correct for small nonzer values due to numerical precision
+    np.fill_diagonal(D, 0) # correct for small nonzero values due to numerical precision
     return D
 
 def ragged_to_rect_repeat_last(all_bs, dtype=np.float64):

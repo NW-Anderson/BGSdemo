@@ -12,6 +12,7 @@ names(exonMutMap) <- c("start", "stop", "rate")
 ggplot(exonMap) + 
   geom_point(aes(x = midPoint / 1e6,
                  y = size)) +
+  geom_vline(xintercept = 23181599/1e6)
   geom_vline(xintercept = 49885518.61638361/1e6)
 
 exonMap <- exonMap %>% mutate(size = stop - start,

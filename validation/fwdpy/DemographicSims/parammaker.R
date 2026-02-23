@@ -90,3 +90,8 @@ for(demo in c("ooa.yaml")){
 master$seed <- sample(1:1e6,nrow(master))
 write.table(master, file = "ooaGamma.txt",
             row.names = F,col.names = F, quote=F)
+
+library(dplyr)
+master <- data.frame(seed = sample(1:1e6,5e3))
+write.table(master, file = "kim_et_al.txt",
+            row.names = F,col.names = F, quote=F)
