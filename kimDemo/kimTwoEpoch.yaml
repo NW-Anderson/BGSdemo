@@ -1,0 +1,18 @@
+description: 2 epoch bottleneck.
+doi:
+- XXX
+time_units: years
+generation_time: 25
+
+demes:
+- name: AMH
+  description: Anatomically modern humans
+  epochs:
+  - {end_time: 62500, start_size: 12300}
+- name: OOA
+  description: Bottleneck out-of-Africa population
+  ancestors: [AMH]
+  epochs:
+  - {start_size: 2100}
+
+

@@ -1300,6 +1300,28 @@ def bgs_wrapper(u,
 ###################
 # OOA Gamma Exons #
 ###################
+
+def get_proj_data(params, focalIndex, n_load, sample_size, key="ceu", dtype=np.float64):
+    seeds = [y for x, y in params][0:n_load]
+    n = len(seeds)
+    if n == 0:
+        raise ValueError("No seeds")
+
+    # init accumulator
+    with np.load(f"{seeds[0]}.npz") as z:
+        acc = np.array(z[key][focalIndex], dtype=dtype, copy=True)
+        acc = moments.Spectrum(acc)
+        acc = acc.project([sample_size])
+    # in-place add
+    for seed in seeds[1:]:
+        with np.load(f"{seed}.npz") as z:
+            tmp = moments.Spectrum(z[key][focalIndex])
+            tmp = tmp.project([sample_size])
+            acc += tmp
+
+    acc /= n
+    return acc
+    
 def get_ceu_data(params, focalIndex, n_load, key="ceu", dtype=np.float64):
     seeds = [y for x, y in params][0:n_load]
     n = len(seeds)
@@ -1511,6 +1533,9 @@ focalWindow = exonMap[focalIndex]
 # endtime = datetime.now()
 # endtime - startTime
 
+data = get_proj_data(params, focalIndex, 2000, 200)
+np.savez_compressed('site_' + str(49885518)+'_proj', data=data)
+
 # np.savez_compressed('site_' + str(49885518), data=data)
 data = np.load('site_' + str(49885518) + '.npz')
 data = data['data']
@@ -1575,277 +1600,277 @@ for i in range(4):
 #############
 # OOA Gamma #
 #############
-# def get_ceu_data(params):
-#     seeds = [y for x,y in params]
-#     numSum = 0
-#     data = None
-#     for seed in seeds:
-#         loaded = np.load(str(seed) + '.npz')
-#         loaded = loaded['ceu']
-#         loaded = loaded
+def get_ceu_data(params):
+    seeds = [y for x,y in params]
+    numSum = 0
+    data = None
+    for seed in seeds:
+        loaded = np.load(str(seed) + '.npz')
+        loaded = loaded['ceu']
+        loaded = loaded
         
-#         if data is None:
-#             data = loaded
-#         else:
-#             data = np.add(data, loaded)
+        if data is None:
+            data = loaded
+        else:
+            data = np.add(data, loaded)
         
-#         numSum += 1
+        numSum += 1
     
-#     data /= numSum
-#     return data
+    data /= numSum
+    return data
 
-# def read_params():
-#     intervals = []
-#     with open('ooaGamma.txt') as f:
-#         for line in f:
-#             if line.startswith("#") or line.strip() == "":
-#                 continue
-#             fields = line.strip().split()
-#             demo   = str(fields[0])
-#             seed  = int(fields[1])
-#             intervals.append([demo, seed])
-#     return intervals
+def read_params():
+    intervals = []
+    with open('ooaGamma.txt') as f:
+        for line in f:
+            if line.startswith("#") or line.strip() == "":
+                continue
+            fields = line.strip().split()
+            demo   = str(fields[0])
+            seed  = int(fields[1])
+            intervals.append([demo, seed])
+    return intervals
 
-# def get_windows(recMap, mutMap):
-#     chrom_start = recMap[0][0]
-#     chrom_end = get_max_positions(recMap, mutMap)
+def get_windows(recMap, mutMap):
+    chrom_start = recMap[0][0]
+    chrom_end = get_max_positions(recMap, mutMap)
 
     
-#     pos = [chrom_start + 5e5]
-#     done = False
-#     while not done:
-#         new_pos = pos[-1] + 1e6
-#         if new_pos <= chrom_end:
-#             pos.append(new_pos)
-#         else:
-#             done = True
+    pos = [chrom_start + 5e5]
+    done = False
+    while not done:
+        new_pos = pos[-1] + 1e6
+        if new_pos <= chrom_end:
+            pos.append(new_pos)
+        else:
+            done = True
             
-#     windows = [[p - 1, p + 1] for p in pos]
-#     windows = [x for w in windows for x in w]
-#     windows.insert(0, 0)
-#     windows.append(chrom_end)
+    windows = [[p - 1, p + 1] for p in pos]
+    windows = [x for w in windows for x in w]
+    windows.insert(0, 0)
+    windows.append(chrom_end)
     
-#     return windows
+    return windows
 
-# def get_focal_pos(windows):
-#     tmp = []
-#     for i in range(len(windows) - 1):
-#         if windows[i+1] - windows[i] == 2:
-#             tmp.append([windows[i], windows[i+1]])
+def get_focal_pos(windows):
+    tmp = []
+    for i in range(len(windows) - 1):
+        if windows[i+1] - windows[i] == 2:
+            tmp.append([windows[i], windows[i+1]])
     
-#     return [(x+y)/2 for x,y in tmp]
+    return [(x+y)/2 for x,y in tmp]
 
-# def get_max_positions(recMap, mutMap):
-#     return max(recMap[-1][1], mutMap[-1][1])
+def get_max_positions(recMap, mutMap):
+    return max(recMap[-1][1], mutMap[-1][1])
 
+# 875 / 2 / 12378 * shape to get the 0.006 number
+# mean = 0.00657416 / 2
+# shape = 0.186
+# n_bins = 10
+# representative = 'conditional_mean'
+def discretize_deleterious_gamma_dfe_mean_shape(
+    mean,
+    shape,
+    n_bins,
+    representative = "conditional_mean"):
+    """
+    Discretize a deleterious Gamma DFE parameterized by (mean, shape)
+    into a list [[p, s], ...], with s > 0.
+
+    Gamma parameterization:
+        S ~ Gamma(k=shape, theta=mean/shape)
+        E[S] = mean
+
+    Binning scheme:
+        Equal-probability (quantile) bins, with a final [q, +inf) tail.
+        No truncation.
+
+    Parameters
+    ----------
+    mean : float
+        Mean deleterious magnitude E[S] > 0.
+    shape : float
+        Gamma shape k > 0.
+    n_bins : int
+        Number of bins >= 1.
+    representative : {"conditional_mean", "mid_quantile"}
+        Representative value per bin.
+
+    Returns
+    -------
+    dfe : list of [p, s]
+        Discrete DFE with probabilities p and selection coefficients s < 0.
+
+    Notes
+    -----
+    Requires SciPy.
+    """
+    if mean <= 0:
+        raise ValueError("mean must be > 0")
+    if shape <= 0:
+        raise ValueError("shape must be > 0")
+    if n_bins < 1 or int(n_bins) != n_bins:
+        raise ValueError("n_bins must be an integer >= 1")
+
+    representative = representative.lower()
+    if representative not in {"conditional_mean", "mid_quantile"}:
+        raise ValueError("representative must be 'conditional_mean' or 'mid_quantile'")
+
+    try:
+        from scipy.stats import gamma as gamma_dist
+    except ImportError as e:
+        raise ImportError("This function requires SciPy (pip install scipy).") from e
+
+    k = float(shape)
+    mean = float(mean)
+    theta = mean / k
+    n = int(n_bins)
+
+    # Single-bin edge case
+    if n == 1:
+        return [[1.0, mean]]
+
+    dist_k = gamma_dist(a=k, scale=theta)
+    dist_k1 = gamma_dist(a=k + 1.0, scale=theta)
+
+    p = 1.0 / n
+
+    # Interior quantile cutpoints: F^{-1}(i/n)
+    cutpoints = [dist_k.ppf(i / n) for i in range(1, n)]
+
+    bounds = [(0.0, cutpoints[0])]
+    for i in range(1, len(cutpoints)):
+        bounds.append((cutpoints[i - 1], cutpoints[i]))
+    bounds.append((cutpoints[-1], float("inf")))
+
+    dfe = []
+
+    if representative == "mid_quantile":
+        for i in range(n):
+            u = (i + 0.5) / n
+            s_mag = dist_k.ppf(u)
+            dfe.append([p, -float(s_mag)])
+        return dfe
+
+    # Conditional-mean representative
+    for (a, b) in bounds:
+        if b == float("inf"):
+            denom = dist_k.sf(a)
+            numer = dist_k1.sf(a)
+        else:
+            denom = dist_k.cdf(b) - dist_k.cdf(a)
+            numer = dist_k1.cdf(b) - dist_k1.cdf(a)
+
+        if denom <= 0:
+            raise RuntimeError(f"Nonpositive bin mass for bin [{a}, {b}].")
+
+        mean_mag = (theta * k) * (numer / denom)
+        dfe.append([p, float(mean_mag)])
+
+    return dfe
+
+os.chdir("/home/nathan/Documents/GitHub/BGSdemo/validation/fwdpy/DemographicSims/ooa/threepop/weakSelection")
+params = read_params()
+recName = "YRI_recombination_map_hg38_chr_22.bed"
+mutName = "roulette_tbl_chr22.csv"
+exonName = "exons_chr22.bed"
+recMap = read_rec_map(recName)
+mutMap = read_mut_rates(mutName)
+exonMap = read_exon_map(exonName)
+
+recMap = simplify_rate_map(recMap)
+mutMap = simplify_rate_map(mutMap)
+
+exonMutMap, U = make_exon_only_mutmap(mutMap, exonMap) 
+
+windows = get_windows(recMap, mutMap)
+focal_positions = get_focal_pos(windows)
+# import random
+# focalPos = random.sample(focal_positions, 1)[0]
+chosen = [pos for i, pos in enumerate(focal_positions) if (i + 1) % 10 == 0 ]
+sample_size = 40
+sampled_demes = ['CEU']
+demo = demes.load('ooa.yaml')
+os.chdir('/media/nathan/T7/BGSdemo/gammaOOAData')
+
+# focalPos = chosen[0]
+# focalIndex = [i for i,x in enumerate(focal_positions) if x == focalPos][0]
 # # 875 / 2 / 12378 * shape to get the 0.006 number
-# # mean = 0.00657416 / 2
-# # shape = 0.186
-# # n_bins = 10
-# # representative = 'conditional_mean'
-# def discretize_deleterious_gamma_dfe_mean_shape(
-#     mean,
-#     shape,
-#     n_bins,
-#     representative = "conditional_mean"):
-#     """
-#     Discretize a deleterious Gamma DFE parameterized by (mean, shape)
-#     into a list [[p, s], ...], with s > 0.
+# mean = 0.00657416 / 2
+# shape = 0.186
 
-#     Gamma parameterization:
-#         S ~ Gamma(k=shape, theta=mean/shape)
-#         E[S] = mean
+# nbins = 10
 
-#     Binning scheme:
-#         Equal-probability (quantile) bins, with a final [q, +inf) tail.
-#         No truncation.
+# dfe = discretize_deleterious_gamma_dfe_mean_shape(mean, shape, nbins)
 
-#     Parameters
-#     ----------
-#     mean : float
-#         Mean deleterious magnitude E[S] > 0.
-#     shape : float
-#         Gamma shape k > 0.
-#     n_bins : int
-#         Number of bins >= 1.
-#     representative : {"conditional_mean", "mid_quantile"}
-#         Representative value per bin.
+# ss = [y for x,y in dfe]
 
-#     Returns
-#     -------
-#     dfe : list of [p, s]
-#         Discrete DFE with probabilities p and selection coefficients s < 0.
+# fs, ancNe = bgs_wrapper(u = exonMutMap,
+#                         r = recMap,
+#                         focalPos = focalPos,
+#                         sample_size = [sample_size],
+#                         ss = ss,
+#                         sampled_demes=sampled_demes,
+#                         g = demo)
 
-#     Notes
-#     -----
-#     Requires SciPy.
-#     """
-#     if mean <= 0:
-#         raise ValueError("mean must be > 0")
-#     if shape <= 0:
-#         raise ValueError("shape must be > 0")
-#     if n_bins < 1 or int(n_bins) != n_bins:
-#         raise ValueError("n_bins must be an integer >= 1")
+all_data = get_ceu_data(params)
 
-#     representative = representative.lower()
-#     if representative not in {"conditional_mean", "mid_quantile"}:
-#         raise ValueError("representative must be 'conditional_mean' or 'mid_quantile'")
+for focalPos in [chosen[3]]:
+    focalIndex = [i for i,x in enumerate(focal_positions) if x == focalPos][0]
 
-#     try:
-#         from scipy.stats import gamma as gamma_dist
-#     except ImportError as e:
-#         raise ImportError("This function requires SciPy (pip install scipy).") from e
-
-#     k = float(shape)
-#     mean = float(mean)
-#     theta = mean / k
-#     n = int(n_bins)
-
-#     # Single-bin edge case
-#     if n == 1:
-#         return [[1.0, mean]]
-
-#     dist_k = gamma_dist(a=k, scale=theta)
-#     dist_k1 = gamma_dist(a=k + 1.0, scale=theta)
-
-#     p = 1.0 / n
-
-#     # Interior quantile cutpoints: F^{-1}(i/n)
-#     cutpoints = [dist_k.ppf(i / n) for i in range(1, n)]
-
-#     bounds = [(0.0, cutpoints[0])]
-#     for i in range(1, len(cutpoints)):
-#         bounds.append((cutpoints[i - 1], cutpoints[i]))
-#     bounds.append((cutpoints[-1], float("inf")))
-
-#     dfe = []
-
-#     if representative == "mid_quantile":
-#         for i in range(n):
-#             u = (i + 0.5) / n
-#             s_mag = dist_k.ppf(u)
-#             dfe.append([p, -float(s_mag)])
-#         return dfe
-
-#     # Conditional-mean representative
-#     for (a, b) in bounds:
-#         if b == float("inf"):
-#             denom = dist_k.sf(a)
-#             numer = dist_k1.sf(a)
-#         else:
-#             denom = dist_k.cdf(b) - dist_k.cdf(a)
-#             numer = dist_k1.cdf(b) - dist_k1.cdf(a)
-
-#         if denom <= 0:
-#             raise RuntimeError(f"Nonpositive bin mass for bin [{a}, {b}].")
-
-#         mean_mag = (theta * k) * (numer / denom)
-#         dfe.append([p, float(mean_mag)])
-
-#     return dfe
-
-# os.chdir("/home/nathan/Documents/GitHub/BGSdemo/validation/fwdpy/DemographicSims/ooa/threepop/weakSelection")
-# params = read_params()
-# recName = "YRI_recombination_map_hg38_chr_22.bed"
-# mutName = "roulette_tbl_chr22.csv"
-# exonName = "exons_chr22.bed"
-# recMap = read_rec_map(recName)
-# mutMap = read_mut_rates(mutName)
-# exonMap = read_exon_map(exonName)
-
-# recMap = simplify_rate_map(recMap)
-# mutMap = simplify_rate_map(mutMap)
-
-# exonMutMap, U = make_exon_only_mutmap(mutMap, exonMap) 
-
-# windows = get_windows(recMap, mutMap)
-# focal_positions = get_focal_pos(windows)
-# # import random
-# # focalPos = random.sample(focal_positions, 1)[0]
-# chosen = [pos for i, pos in enumerate(focal_positions) if (i + 1) % 10 == 0 ]
-# sample_size = 40
-# sampled_demes = ['CEU']
-# demo = demes.load('ooa.yaml')
-# os.chdir('/media/nathan/T7/BGSdemo/gammaOOAData')
-
-# # focalPos = chosen[0]
-# # focalIndex = [i for i,x in enumerate(focal_positions) if x == focalPos][0]
-# # # 875 / 2 / 12378 * shape to get the 0.006 number
-# # mean = 0.00657416 / 2
-# # shape = 0.186
-
-# # nbins = 10
-
-# # dfe = discretize_deleterious_gamma_dfe_mean_shape(mean, shape, nbins)
-
-# # ss = [y for x,y in dfe]
-
-# # fs, ancNe = bgs_wrapper(u = exonMutMap,
-# #                         r = recMap,
-# #                         focalPos = focalPos,
-# #                         sample_size = [sample_size],
-# #                         ss = ss,
-# #                         sampled_demes=sampled_demes,
-# #                         g = demo)
-
-# all_data = get_ceu_data(params)
-
-# for focalPos in chosen:
-#     focalIndex = [i for i,x in enumerate(focal_positions) if x == focalPos][0]
-
-#     simData = moments.Spectrum(all_data[focalIndex],data_folded=False)
+    simData = moments.Spectrum(all_data[focalIndex],data_folded=False)
     
-#     fig, ax = plt.subplots(2, 2, figsize=(16, 8), sharex=True, sharey=False)
-#     fig.text(0.5, 0.04, 'Allele Frequency', ha='center')
-#     fig.text(0.04, 0.5, 'Count', va='center', rotation='vertical')
-#     fig.subplots_adjust(hspace = .25)
-#     fig.suptitle(str(focalPos))
-#     for i in range(4):
-#         nbins = [1, 5, 10, 20][i]
-#         projData = simData.project([sample_size])
+    fig, ax = plt.subplots(2, 2, figsize=(16, 8), sharex=True, sharey=False)
+    fig.text(0.5, 0.04, 'Allele Frequency', ha='center')
+    fig.text(0.04, 0.5, 'Count', va='center', rotation='vertical')
+    fig.subplots_adjust(hspace = .25)
+    fig.suptitle(str(focalPos))
+    for i in range(4):
+        nbins = [1, 5, 10, 20][i]
+        projData = simData.project([sample_size])
         
-#         if i >= 2:
-#             i -= 2
-#             j = 1
-#         else:
-#             j = 0
+        if i >= 2:
+            i -= 2
+            j = 1
+        else:
+            j = 0
         
-#         # 875 / 2 / 12378 * shape to get the 0.006 number
-#         mean = 0.00657416 / 2
-#         shape = 0.186
+        # 875 / 2 / 12378 * shape to get the 0.006 number
+        mean = 0.00657416 / 2
+        shape = 0.186
         
-#         dfe = discretize_deleterious_gamma_dfe_mean_shape(mean, shape, nbins)
+        dfe = discretize_deleterious_gamma_dfe_mean_shape(mean, shape, nbins)
         
-#         ss = [y for x,y in dfe]
+        ss = [y for x,y in dfe]
         
-#         fs, ancNe = bgs_wrapper(u = exonMutMap,
-#                                 r = recMap,
-#                                 focalPos = focalPos,
-#                                 sample_size = [sample_size],
-#                                 ss = ss,
-#                                 sampled_demes=sampled_demes,
-#                                 g = demo)
+        fs, ancNe = bgs_wrapper(u = exonMutMap,
+                                r = recMap,
+                                focalPos = focalPos,
+                                sample_size = [sample_size],
+                                ss = ss,
+                                sampled_demes=sampled_demes,
+                                g = demo)
             
-#         fs_neu = moments.Spectrum.from_demes(
-#             demo, 
-#             sampled_demes=sampled_demes, 
-#             sample_sizes=[sample_size]
-#         )
+        fs_neu = moments.Spectrum.from_demes(
+            demo, 
+            sampled_demes=sampled_demes, 
+            sample_sizes=[sample_size]
+        )
         
-#         oldestEpoch, ancCensusSize = getOldestEpoch(demo)
-#         fs = fs * 8 * 1e-8 * ancNe
-#         projData = projData * 1e-8
-#         fs_neu = fs_neu * 8 * 1e-8 * ancCensusSize        
+        oldestEpoch, ancCensusSize = getOldestEpoch(demo)
+        fs = fs * 8 * 1e-8 * ancNe
+        projData = projData * 1e-8
+        fs_neu = fs_neu * 8 * 1e-8 * ancCensusSize        
         
-#         ax[i,j].plot(fs, "-", ms=8, lw=1, label="BGS")
-#         ax[i,j].plot(projData, "-", ms=8, lw=1, label="fwdpy")
-#         ax[i,j].plot(fs_neu, "-", ms=8, lw=1, label="SNM")
-#         ax[i,j].set_title("nbins = " + str(nbins)) 
-#         ax[i,j].set_yscale('log')
-#         ax[i,j].annotate("B=" + str(round(fs.pi()/fs_neu.pi(),3)),xy=(sample_size / 10, max(fs[1:-1]) * 0.8),size="x-large")
-#         ax[i,j].annotate("B_sim=" + str(round(projData.pi()/fs_neu.pi(),3)),xy=(sample_size / 10, max(fs[1:-1]) * 0.55),size="x-large")
-#         if i == 1 and j == 1:
-#             ax[i,j].legend();
+        ax[i,j].plot(fs[0:3], "-", ms=8, lw=1, label="BGS")
+        ax[i,j].plot(projData[0:3], "-", ms=8, lw=1, label="fwdpy")
+        ax[i,j].plot(fs_neu[0:3], "-", ms=8, lw=1, label="SNM")
+        ax[i,j].set_title("nbins = " + str(nbins)) 
+        ax[i,j].set_yscale('log')
+        ax[i,j].annotate("B=" + str(round(fs.pi()/fs_neu.pi(),3)),xy=(sample_size / 10, max(fs[1:-1]) * 0.8),size="x-large")
+        ax[i,j].annotate("B_sim=" + str(round(projData.pi()/fs_neu.pi(),3)),xy=(sample_size / 10, max(fs[1:-1]) * 0.55),size="x-large")
+        if i == 1 and j == 1:
+            ax[i,j].legend();
 
 ######################
 # OOA weak selection #
@@ -2355,62 +2380,62 @@ for i in range(4):
 # # equilibrium selected focal site #
 # ###################################
 
-# os.chdir("/media/nathan/T7/BGSdemo/parsedMoreSelData")
+os.chdir("/media/nathan/T7/BGSdemo/parsedMoreSelData")
 
-# # hardcoding some parameters
-# u = 1e-8
-# r = 1e-8
-# L = 1e6
-# focalPos = 5e5
-# sample_size = 500
-# proj_size = 40
+# hardcoding some parameters
+u = 1e-8
+r = 1e-8
+L = 1e6
+focalPos = 5e5
+sample_size = 500
+proj_size = 200
 
-# curwi = "wi5e4.csv"
+curwi = "wi5e4.csv"
 
-# fig, ax = plt.subplots(3, 3, figsize=(16, 8), sharex=True, sharey=False)
-# fig.text(0.5, 0.04, 'Allele Frequency', ha='center')
-# fig.text(0.04, 0.5, 'Count', va='center', rotation='vertical')
-# fig.text(0.5, 0.96, curwi, ha='center')
-# fig.subplots_adjust(hspace = .25)
-# for i in range(3):
-#     for j in range(3):
-#         curs = [1e-3, 5e-3, 1e-2][i]
-#         curN = [1e3, 5e3, 1e4][j]
-#         simData = pd.read_csv(str(curs) + "_" + str(int(curN)) + "_" + curwi + ".csv", header = None)
-#         simData = simData[0].to_numpy()
-#         simData = moments.Spectrum(simData,data_folded=False) / 11 / 1000
-#         projData = simData.project([proj_size])
+fig, ax = plt.subplots(3, 3, figsize=(16, 8), sharex=True, sharey=False)
+fig.text(0.5, 0.04, 'Allele Frequency', ha='center')
+fig.text(0.04, 0.5, 'Count', va='center', rotation='vertical')
+fig.text(0.5, 0.96, curwi, ha='center')
+fig.subplots_adjust(hspace = .25)
+for i in range(3):
+    for j in range(3):
+        curs = [1e-3, 5e-3, 1e-2][i]
+        curN = [1e3, 5e3, 1e4][j]
+        simData = pd.read_csv(str(curs) + "_" + str(int(curN)) + "_" + curwi + ".csv", header = None)
+        simData = simData[0].to_numpy()
+        simData = moments.Spectrum(simData,data_folded=False) / 11 / 1000
+        projData = simData.project([proj_size])
         
-#         fs, ancNe = bgs_wrapper(u = u,
-#                                 r = r,
-#                                 focalPos = focalPos,
-#                                 sample_size = [sample_size],
-#                                 ss = [curs],
-#                                 L = L,
-#                                 cs = [curN],
-#                                 focal_s = curs)
+        fs, ancNe = bgs_wrapper(u = u,
+                                r = r,
+                                focalPos = focalPos,
+                                sample_size = [sample_size],
+                                ss = [curs],
+                                L = L,
+                                cs = [curN],
+                                focal_s = curs)
         
-#         fs_indep = moments.Spectrum(moments.LinearSystem_1D.steady_state_1D(sample_size, gamma = - 2 * curN * curs))
+        fs_indep = moments.Spectrum(moments.LinearSystem_1D.steady_state_1D(sample_size, gamma = - 2 * curN * curs))
 
-#         if curwi == "wi5e4.csv":
-#             fs = fs *  4 * 2 * 5e4 * 1e-8 * ancNe
-#             fs_indep = fs_indep * 4 * 2 * 5e4 * 1e-8 * curN
-#             projData = projData 
-#         if curwi == "wi1e5.csv":
-#             fs = fs *  4 * 2 * 1e5 * 1e-8 * ancNe
-#             fs_indep = fs_indep * 4 * 2 * 1e5 * 1e-8 * curN
-#             projData = projData 
+        if curwi == "wi5e4.csv":
+            fs = fs *  4 * 2 * 5e4 * 1e-8 * ancNe
+            fs_indep = fs_indep * 4 * 2 * 5e4 * 1e-8 * curN
+            projData = projData 
+        if curwi == "wi1e5.csv":
+            fs = fs *  4 * 2 * 1e5 * 1e-8 * ancNe
+            fs_indep = fs_indep * 4 * 2 * 1e5 * 1e-8 * curN
+            projData = projData 
         
-#         fs = fs.project([proj_size])
-#         fs_indep = fs_indep.project([proj_size])
+        fs = fs.project([proj_size])
+        fs_indep = fs_indep.project([proj_size])
         
-#         ax[i,j].plot(fs[0:21], ".-", ms=8, lw=1, label="BGS")
-#         ax[i,j].plot(projData[0:21], "x-", ms=8, lw=1, label="fwdpy")
-#         ax[i,j].plot(fs_indep[0:21], "+-", ms=8, lw=1, label="single locus")
-#         ax[i,j].set_title("s = " + str(curs) + ", N = " + str(int(curN)))
-#         ax[i,j].set_yscale('log')
-#         if np.logical_and(i == 2, j == 2):
-#             ax[i,j].legend();
+        ax[i,j].plot(fs, ".-", ms=8, lw=1, label="BGS")
+        ax[i,j].plot(projData, "x-", ms=8, lw=1, label="fwdpy")
+        ax[i,j].plot(fs_indep, "+-", ms=8, lw=1, label="single locus")
+        ax[i,j].set_title("s = " + str(curs) + ", N = " + str(int(curN)))
+        ax[i,j].set_yscale('log')
+        if np.logical_and(i == 2, j == 2):
+            ax[i,j].legend();
 
 # ###################
 # # equilibrium dfe #
